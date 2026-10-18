@@ -1,6 +1,7 @@
 #include "render/chunk_mesh.h"
 
 #include <array>
+#include <cstdlib>
 
 #include <glm/glm.hpp>
 
@@ -41,7 +42,9 @@ const std::array<FaceDef, 6> kFaces = {{
      {{0.0f, 0.0f}, {0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f}}, 0.65f, 2},
 }};
 
-BlockId blockAt(const Chunk& chunk, const World& world, int x, int y, int z) {
+constexpr float kAoLevels[4] = {0.45f, 0.62f, 0.80f, 1.0f};
+
+inline BlockId blockAt(const Chunk& chunk, const World& world, int x, int y, int z) {
     if (chunk.contains(x, y, z)) {
         return static_cast<BlockId>(chunk.get(x, y, z));
     }
@@ -49,15 +52,80 @@ BlockId blockAt(const Chunk& chunk, const World& world, int x, int y, int z) {
     return world.getBlock(origin.x + x, origin.y + y, origin.z + z);
 }
 
-float lerp(float a, float b, float t) { return a + (b - a) * t; }
+inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+// Classic voxel AO: two edge neighbours and the diagonal corner of the face.
+float vertexAo(const Chunk& chunk, const World& world, int x, int y, int z, const FaceDef& face,
+               int cornerIndex) {
+    const int axis = face.normal.x != 0 ? 0 : (face.normal.y != 0 ? 1 : 2);
+    const int tangentA = (axis + 1) % 3;
+    const int tangentB = (axis + 2) % 3;
+
+    const int signA = face.corner[cornerIndex][tangentA] == 1 ? 1 : -1;
+    const int signB = face.corner[cornerIndex][tangentB] == 1 ? 1 : -1;
+
+    glm::ivec3 offsetA = face.normal;
+    offsetA[tangentA] += signA;
+    glm::ivec3 offsetB = face.normal;
+    offsetB[tangentB] += signB;
+
+    const bool sideA = isOpaque(blockAt(chunk, world, x + offsetA.x, y + offsetA.y, z + offsetA.z));
+    const bool sideB = isOpaque(blockAt(chunk, world, x + offsetB.x, y + offsetB.y, z + offsetB.z));
+    const bool diagonal = isOpaque(blockAt(chunk, world, x + offsetA.x + offsetB.x,
+                                          y + offsetA.y + offsetB.y,
+                                          z + offsetA.z + offsetB.z));
+
+    const int level = (sideA && sideB) ? 0 : 3 - (static_cast<int>(sideA) +
+                                                  static_cast<int>(sideB) +
+                                                  static_cast<int>(diagonal));
+    return kAoLevels[level];
+}
+
+template <typename Mesh>
+void emitFace(const Chunk& chunk, Mesh& mesh, int x, int y, int z, const FaceDef& face,
+              const glm::vec4& uvRect, float light, const float ao[4]) {
+    const glm::ivec3 origin = chunk.origin();
+    const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
+
+    for (int c = 0; c < 4; ++c) {
+        Vertex v{};
+        v.pos[0] = static_cast<float>(origin.x + x + face.corner[c].x);
+        v.pos[1] = static_cast<float>(origin.y + y + face.corner[c].y);
+        v.pos[2] = static_cast<float>(origin.z + z + face.corner[c].z);
+        v.uv[0] = lerp(uvRect.x, uvRect.z, face.uv[c].x);
+        v.uv[1] = lerp(uvRect.y, uvRect.w, face.uv[c].y);
+        v.light = light * ao[c];
+        mesh.vertices.push_back(v);
+    }
+
+    // Split along the darker diagonal to avoid visible anisotropy artefacts.
+    if (ao[0] + ao[2] < ao[1] + ao[3]) {
+        mesh.indices.push_back(base + 1);
+        mesh.indices.push_back(base + 2);
+        mesh.indices.push_back(base + 3);
+        mesh.indices.push_back(base + 1);
+        mesh.indices.push_back(base + 3);
+        mesh.indices.push_back(base + 0);
+    } else {
+        mesh.indices.push_back(base + 0);
+        mesh.indices.push_back(base + 1);
+        mesh.indices.push_back(base + 2);
+        mesh.indices.push_back(base + 0);
+        mesh.indices.push_back(base + 2);
+        mesh.indices.push_back(base + 3);
+    }
+}
 
 }  // namespace
 
-void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas, MeshData& out) {
-    out.vertices.clear();
-    out.indices.clear();
+void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
+                    ChunkMeshData& out) {
+    out.opaque.vertices.clear();
+    out.opaque.indices.clear();
+    out.water.vertices.clear();
+    out.water.indices.clear();
 
-    const glm::ivec3 origin = chunk.origin();
+    auto lock = chunk.readLock();
 
     for (int y = 0; y < Chunk::SY; ++y) {
         for (int z = 0; z < Chunk::SZ; ++z) {
@@ -67,14 +135,13 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas, 
                     continue;
                 }
                 const BlockDef& def = blockDef(block);
+                const bool water = block == BLOCK_WATER;
 
                 for (const FaceDef& face : kFaces) {
                     const BlockId neighbour =
                         blockAt(chunk, world, x + face.normal.x, y + face.normal.y,
                                 z + face.normal.z);
 
-                    // Same block behind the face (water/water) or any opaque
-                    // neighbour hides the face completely.
                     if (neighbour == block || isOpaque(neighbour)) {
                         continue;
                     }
@@ -83,25 +150,17 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas, 
                                    : face.tileSlot == 1 ? def.tileBottom
                                                         : def.tileSide;
                     const glm::vec4 uvRect = atlas.tileUV(tile);
-                    const std::uint32_t base = static_cast<std::uint32_t>(out.vertices.size());
 
-                    for (int c = 0; c < 4; ++c) {
-                        Vertex v{};
-                        v.pos[0] = static_cast<float>(origin.x + x + face.corner[c].x);
-                        v.pos[1] = static_cast<float>(origin.y + y + face.corner[c].y);
-                        v.pos[2] = static_cast<float>(origin.z + z + face.corner[c].z);
-                        v.uv[0] = lerp(uvRect.x, uvRect.z, face.uv[c].x);
-                        v.uv[1] = lerp(uvRect.y, uvRect.w, face.uv[c].y);
-                        v.light = face.light;
-                        out.vertices.push_back(v);
+                    if (water) {
+                        const float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+                        emitFace(chunk, out.water, x, y, z, face, uvRect, face.light * 0.9f, ao);
+                    } else {
+                        float ao[4];
+                        for (int c = 0; c < 4; ++c) {
+                            ao[c] = vertexAo(chunk, world, x, y, z, face, c);
+                        }
+                        emitFace(chunk, out.opaque, x, y, z, face, uvRect, face.light, ao);
                     }
-
-                    out.indices.push_back(base + 0);
-                    out.indices.push_back(base + 1);
-                    out.indices.push_back(base + 2);
-                    out.indices.push_back(base + 0);
-                    out.indices.push_back(base + 2);
-                    out.indices.push_back(base + 3);
                 }
             }
         }

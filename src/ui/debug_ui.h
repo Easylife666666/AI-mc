@@ -7,6 +7,8 @@ namespace aimc {
 struct Camera;
 class World;
 struct DrawStats;
+struct RayHit;
+class Atlas;
 
 class DebugUI {
 public:
@@ -22,10 +24,13 @@ public:
 
     void beginFrame();
     void draw(const Camera& camera, const World& world, const DrawStats& stats, float dt);
+    void drawHud(const RayHit& hit, const int* hotbarBlocks, int hotbarCount, int selected,
+                 const Atlas& atlas, bool flying);
     void endFrame();
 
     void toggle() { m_visible = !m_visible; }
     bool visible() const { return m_visible; }
+    bool wantsMouse() const;
 
 private:
     bool m_initialized = false;

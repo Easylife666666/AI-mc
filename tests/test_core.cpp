@@ -2,10 +2,13 @@
 
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "core/math.h"
+#include "game/raycast.h"
 #include "render/atlas.h"
 #include "render/chunk_mesh.h"
+#include "render/frustum.h"
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/terrain.h"
@@ -91,17 +94,41 @@ TEST(Terrain, SameSeedSameWorld) {
     EXPECT_GT(different, 0);
 }
 
+TEST(Terrain, TreesAppearAboveSeaLevel) {
+    Terrain terrain(1234);
+    int leaves = 0;
+    int logs = 0;
+    for (int cz = -1; cz <= 1; ++cz) {
+        for (int cx = -1; cx <= 1; ++cx) {
+            Chunk chunk(glm::ivec2(cx, cz));
+            terrain.generate(chunk);
+            for (int y = 0; y < Chunk::SY; ++y) {
+                for (int z = 0; z < Chunk::SZ; ++z) {
+                    for (int x = 0; x < Chunk::SX; ++x) {
+                        const auto block = chunk.get(x, y, z);
+                        leaves += block == static_cast<std::uint8_t>(BLOCK_LEAVES) ? 1 : 0;
+                        logs += block == static_cast<std::uint8_t>(BLOCK_LOG) ? 1 : 0;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_GT(leaves, 0);
+    EXPECT_GT(logs, 0);
+}
+
 TEST(Mesh, SingleBlockEmitsSixFaces) {
     Atlas atlas;
     Chunk chunk(glm::ivec2(0, 0));
     World world;  // no chunks generated: every neighbour is air
     chunk.set(8, 8, 8, static_cast<std::uint8_t>(BLOCK_STONE));
 
-    MeshData mesh;
+    ChunkMeshData mesh;
     buildChunkMesh(chunk, world, atlas, mesh);
 
-    EXPECT_EQ(mesh.vertices.size(), 24u);
-    EXPECT_EQ(mesh.indices.size(), 36u);
+    EXPECT_EQ(mesh.opaque.vertices.size(), 24u);
+    EXPECT_EQ(mesh.opaque.indices.size(), 36u);
+    EXPECT_TRUE(mesh.water.vertices.empty());
 }
 
 TEST(Mesh, SharedFaceIsCulled) {
@@ -111,11 +138,11 @@ TEST(Mesh, SharedFaceIsCulled) {
     chunk.set(8, 8, 8, static_cast<std::uint8_t>(BLOCK_STONE));
     chunk.set(9, 8, 8, static_cast<std::uint8_t>(BLOCK_STONE));
 
-    MeshData mesh;
+    ChunkMeshData mesh;
     buildChunkMesh(chunk, world, atlas, mesh);
 
-    EXPECT_EQ(mesh.vertices.size(), 40u);  // 10 faces
-    EXPECT_EQ(mesh.indices.size(), 60u);
+    EXPECT_EQ(mesh.opaque.vertices.size(), 40u);  // 10 faces
+    EXPECT_EQ(mesh.opaque.indices.size(), 60u);
 }
 
 TEST(Mesh, OpaqueNeighbourCullsFace) {
@@ -125,10 +152,24 @@ TEST(Mesh, OpaqueNeighbourCullsFace) {
     chunk.set(8, 8, 8, static_cast<std::uint8_t>(BLOCK_STONE));
     chunk.set(8, 9, 8, static_cast<std::uint8_t>(BLOCK_DIRT));
 
-    MeshData mesh;
+    ChunkMeshData mesh;
     buildChunkMesh(chunk, world, atlas, mesh);
 
-    EXPECT_EQ(mesh.vertices.size(), 40u);  // the top face of stone is hidden
+    EXPECT_EQ(mesh.opaque.vertices.size(), 40u);  // the top face of stone is hidden
+}
+
+TEST(Mesh, WaterGoesIntoItsOwnBuffer) {
+    Atlas atlas;
+    Chunk chunk(glm::ivec2(0, 0));
+    World world;
+    chunk.set(4, 4, 4, static_cast<std::uint8_t>(BLOCK_WATER));
+
+    ChunkMeshData mesh;
+    buildChunkMesh(chunk, world, atlas, mesh);
+
+    EXPECT_EQ(mesh.opaque.vertices.size(), 0u);
+    EXPECT_EQ(mesh.water.vertices.size(), 24u);
+    EXPECT_EQ(mesh.water.indices.size(), 36u);
 }
 
 TEST(Atlas, UVsStayInsideUnitRange) {
@@ -144,14 +185,58 @@ TEST(Atlas, UVsStayInsideUnitRange) {
     }
 }
 
-TEST(World, ChunksAndBlockLookup) {
+TEST(Frustum, CullsBoxesBehindTheCamera) {
+    const glm::mat4 viewProj =
+        glm::perspective(glm::radians(70.0f), 16.0f / 9.0f, 0.1f, 200.0f) *
+        glm::lookAt(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f),
+                    glm::vec3(0.0f, 1.0f, 0.0f));
+    const Frustum frustum = Frustum::fromViewProj(viewProj);
+
+    EXPECT_TRUE(frustum.intersectsAabb(glm::vec3(-1.0f, -1.0f, -20.0f),
+                                       glm::vec3(1.0f, 1.0f, -18.0f)));
+    EXPECT_FALSE(frustum.intersectsAabb(glm::vec3(-1.0f, -1.0f, 18.0f),
+                                        glm::vec3(1.0f, 1.0f, 20.0f)));
+    EXPECT_FALSE(frustum.intersectsAabb(glm::vec3(100.0f, -1.0f, -20.0f),
+                                        glm::vec3(102.0f, 1.0f, -18.0f)));
+}
+
+TEST(Raycast, HitsExpectedBlockAndNormal) {
+    const auto get = [](int x, int y, int z) -> BlockId {
+        return (x == 0 && y == 0 && z == -3) ? BLOCK_STONE : BLOCK_AIR;
+    };
+    const RayHit hit = raycastVoxel(get, glm::vec3(0.5f), glm::vec3(0.0f, 0.0f, -1.0f), 10.0f);
+    EXPECT_TRUE(hit.hit);
+    EXPECT_EQ(hit.block, glm::ivec3(0, 0, -3));
+    EXPECT_EQ(hit.normal, glm::ivec3(0, 0, 1));
+    EXPECT_NEAR(hit.distance, 2.5f, 1.0e-4f);
+}
+
+TEST(Raycast, RespectsMaxDistance) {
+    const auto get = [](int x, int y, int z) -> BlockId {
+        return (x == 0 && y == 0 && z == -5) ? BLOCK_STONE : BLOCK_AIR;
+    };
+    const RayHit hit = raycastVoxel(get, glm::vec3(0.5f), glm::vec3(0.0f, 0.0f, -1.0f), 2.0f);
+    EXPECT_FALSE(hit.hit);
+}
+
+TEST(Raycast, VerticalHitNormal) {
+    const auto get = [](int x, int y, int z) -> BlockId {
+        return (x == 0 && y == -2 && z == 0) ? BLOCK_DIRT : BLOCK_AIR;
+    };
+    const RayHit hit = raycastVoxel(get, glm::vec3(0.5f, 0.5f, 0.5f),
+                                    glm::vec3(0.0f, -1.0f, 0.0f), 10.0f);
+    EXPECT_TRUE(hit.hit);
+    EXPECT_EQ(hit.block, glm::ivec3(0, -2, 0));
+    EXPECT_EQ(hit.normal, glm::ivec3(0, 1, 0));
+}
+
+TEST(World, EmptyWorldQueriesAreSafe) {
     World world;
-    world.init(99, 1);
-    EXPECT_EQ(world.chunkCount(), 9u);
-    EXPECT_EQ(world.getBlock(0, 0, 0), BLOCK_STONE);
-    EXPECT_NE(world.getBlock(-1, 0, -1), BLOCK_AIR);
-    EXPECT_EQ(world.getBlock(0, Chunk::SY, 0), BLOCK_AIR);
+    world.init(99);
+    EXPECT_EQ(world.chunkCount(), 0u);
+    EXPECT_EQ(world.getBlock(0, 0, 0), BLOCK_AIR);
     EXPECT_EQ(world.getBlock(10000, 0, 10000), BLOCK_AIR);
+    EXPECT_FALSE(world.chunkReady(0, 0));
 }
 
 }  // namespace

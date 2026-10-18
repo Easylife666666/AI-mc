@@ -4,11 +4,15 @@
 
 namespace aimc {
 
-// Procedurally generated 4x4 tile atlas (16 px per tile). No asset files needed.
+// Procedurally generated 4x4 tile atlas. Each 16 px tile gets a 2 px replicated
+// border so mipmaps do not bleed neighbouring tiles. No asset files needed.
 class Atlas {
 public:
     static constexpr int Grid = 4;
     static constexpr int TileSize = 16;
+    static constexpr int Padding = 2;
+    static constexpr int Pitch = TileSize + Padding * 2;
+    static constexpr int Size = Grid * Pitch;
 
     Atlas() = default;
     ~Atlas();
@@ -19,7 +23,7 @@ public:
     bool build();
     unsigned int texture() const { return m_texture; }
 
-    // Returns (u0, v0, u1, v1) with a half-texel inset to avoid bleeding.
+    // Returns (u0, v0, u1, v1) of the tile content in texture space.
     glm::vec4 tileUV(int tile) const;
 
 private:

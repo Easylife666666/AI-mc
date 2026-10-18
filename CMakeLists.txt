@@ -35,10 +35,14 @@ target_compile_features(imgui PUBLIC cxx_std_17)
 
 # ---- engine core (no window needed for logic tests) ----------------------
 add_library(aimc_core STATIC
+  src/game/player.cpp
+  src/game/raycast.cpp
   src/platform/window.cpp
   src/render/atlas.cpp
   src/render/camera.cpp
   src/render/chunk_mesh.cpp
+  src/render/frustum.cpp
+  src/render/selection.cpp
   src/render/shader.cpp
   src/render/screenshot.cpp
   src/world/block.cpp

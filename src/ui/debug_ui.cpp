@@ -1,13 +1,17 @@
 #include "ui/debug_ui.h"
 
 #include <algorithm>
+#include <cstdint>
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
 #include <spdlog/spdlog.h>
 
+#include "game/raycast.h"
+#include "render/atlas.h"
 #include "render/camera.h"
+#include "world/block.h"
 #include "world/world.h"
 
 namespace aimc {
@@ -86,20 +90,90 @@ void DebugUI::draw(const Camera& camera, const World& world, const DrawStats& st
         ImGui::Text("yaw %.1f   pitch %.1f", camera.yawDeg, camera.pitchDeg);
         ImGui::Separator();
 
-        ImGui::Text("chunks      %zu", world.chunkCount());
+        ImGui::Text("chunks      %d / %d visible", stats.visibleChunks, stats.totalChunks);
         ImGui::Text("draw calls  %d", stats.drawCalls);
         ImGui::Text("triangles   %lld", stats.triangles);
-        ImGui::Text("seed %d   radius %d", world.seed(), world.radius());
+        ImGui::Text("seed %d", world.seed());
         ImGui::Separator();
 
-        ImGui::TextDisabled("WASD move  Space/Ctrl up-down");
-        ImGui::TextDisabled("Shift boost  F1 panel  Esc quit");
+        ImGui::TextDisabled("WASD move  Space jump  F fly");
+        ImGui::TextDisabled("LMB break  RMB place  1-9 select");
+        ImGui::TextDisabled("F1 panel  Esc quit");
     }
     ImGui::End();
 }
 
-void DebugUI::endFrame() {
+void DebugUI::drawHud(const RayHit& hit, const int* hotbarBlocks, int hotbarCount, int selected,
+                      const Atlas& atlas, bool flying) {
     if (!m_initialized) {
+        return;
+    }
+    (void)hit;
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+
+    // Crosshair: dark outline + white core.
+    const ImVec2 center(display.x * 0.5f, display.y * 0.5f);
+    draw->AddLine(ImVec2(center.x - 9.0f, center.y), ImVec2(center.x + 9.0f, center.y),
+                  IM_COL32(0, 0, 0, 190), 3.0f);
+    draw->AddLine(ImVec2(center.x, center.y - 9.0f), ImVec2(center.x, center.y + 9.0f),
+                  IM_COL32(0, 0, 0, 190), 3.0f);
+    draw->AddLine(ImVec2(center.x - 8.0f, center.y), ImVec2(center.x + 8.0f, center.y),
+                  IM_COL32(255, 255, 255, 235), 1.5f);
+    draw->AddLine(ImVec2(center.x, center.y - 8.0f), ImVec2(center.x, center.y + 8.0f),
+                  IM_COL32(255, 255, 255, 235), 1.5f);
+
+    if (hotbarCount <= 0) {
+        return;
+    }
+
+    const float slot = 50.0f;
+    const float gap = 4.0f;
+    const float total = static_cast<float>(hotbarCount) * (slot + gap) - gap;
+    const float x0 = (display.x - total) * 0.5f;
+    const float y0 = display.y - slot - 18.0f;
+    const ImTextureID texture = static_cast<ImTextureID>(static_cast<std::intptr_t>(atlas.texture()));
+
+    for (int i = 0; i < hotbarCount; ++i) {
+        const ImVec2 p0(x0 + static_cast<float>(i) * (slot + gap), y0);
+        const ImVec2 p1(p0.x + slot, p0.y + slot);
+        const bool chosen = i == selected;
+        draw->AddRectFilled(p0, p1, chosen ? IM_COL32(45, 45, 45, 225) : IM_COL32(20, 20, 20, 170),
+                            5.0f);
+        draw->AddRect(p0, p1, chosen ? IM_COL32(255, 255, 255, 255) : IM_COL32(90, 90, 90, 210),
+                      5.0f, 0, chosen ? 2.0f : 1.0f);
+
+        const BlockId block = static_cast<BlockId>(hotbarBlocks[i]);
+        const glm::vec4 uv = atlas.tileUV(blockDef(block).tileSide);
+        // OpenGL v=0 is the bottom of the atlas; ImGui's (0,0) is the top.
+        draw->AddImage(texture, ImVec2(p0.x + 6.0f, p0.y + 6.0f), ImVec2(p1.x - 6.0f, p1.y - 6.0f),
+                       ImVec2(uv.x, uv.w), ImVec2(uv.z, uv.y));
+
+        char label[2] = {static_cast<char>('1' + i), '\0'};
+        draw->AddText(ImVec2(p0.x + 4.0f, p0.y + 2.0f), IM_COL32(255, 255, 255, 190), label);
+    }
+
+    if (selected >= 0 && selected < hotbarCount) {
+        const char* name = blockDef(static_cast<BlockId>(hotbarBlocks[selected])).name;
+        const ImVec2 size = ImGui::CalcTextSize(name);
+        draw->AddText(ImVec2((display.x - size.x) * 0.5f, y0 - 22.0f),
+                      IM_COL32(255, 255, 255, 235), name);
+    }
+
+    if (flying) {
+        const char* text = "FLYING";
+        const ImVec2 size = ImGui::CalcTextSize(text);
+        draw->AddText(ImVec2((display.x - size.x) * 0.5f, y0 - 44.0f),
+                      IM_COL32(120, 220, 255, 220), text);
+    }
+}
+
+bool DebugUI::wantsMouse() const {
+    return m_initialized && ImGui::GetIO().WantCaptureMouse;
+}
+
+void DebugUI::endFrame() {    if (!m_initialized) {
         return;
     }
     ImGui::Render();

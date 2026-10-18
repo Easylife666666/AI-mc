@@ -12,10 +12,15 @@ public:
 
     explicit Terrain(int seed);
 
+    // Fills the chunk with terrain and trees. Safe to call concurrently from
+    // multiple threads (each thread should own a Terrain instance).
     void generate(Chunk& chunk) const;
     int heightAt(int worldX, int worldZ) const;
 
+    int seed() const { return m_seed; }
+
 private:
+    int m_seed = 0;
     FastNoiseLite m_height;
 };
 

@@ -19,6 +19,7 @@ public:
     unsigned int id() const { return m_program; }
 
     void setMat4(const char* name, const glm::mat4& value) const;
+    void setVec4(const char* name, const glm::vec4& value) const;
     void setVec3(const char* name, const glm::vec3& value) const;
     void setVec2(const char* name, const glm::vec2& value) const;
     void setFloat(const char* name, float value) const;

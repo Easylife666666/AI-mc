@@ -142,19 +142,22 @@ Atlas::~Atlas() {
 }
 
 bool Atlas::build() {
-    const int size = Grid * TileSize;
-    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(size) * size * 4, 0);
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(Size) * Size * 4, 0);
 
     for (int tile = 0; tile < Grid * Grid; ++tile) {
         const int tx = tile % Grid;
         const int ty = tile / Grid;
-        for (int y = 0; y < TileSize; ++y) {
-            for (int x = 0; x < TileSize; ++x) {
+        for (int py = 0; py < Pitch; ++py) {
+            for (int px = 0; px < Pitch; ++px) {
+                // Replicate the edge texels into the padding ring.
+                const int cx = std::clamp(px - Padding, 0, TileSize - 1);
+                const int cy = std::clamp(py - Padding, 0, TileSize - 1);
                 const glm::vec3 c =
-                    glm::clamp(tileColor(tile, x, y), glm::vec3(0.0f), glm::vec3(1.0f));
-                const int px = tx * TileSize + x;
-                const int py = ty * TileSize + y;
-                const std::size_t o = (static_cast<std::size_t>(py) * size + px) * 4;
+                    glm::clamp(tileColor(tile, cx, cy), glm::vec3(0.0f), glm::vec3(1.0f));
+
+                const int x = tx * Pitch + px;
+                const int y = ty * Pitch + py;
+                const std::size_t o = (static_cast<std::size_t>(y) * Size + x) * 4;
                 pixels[o + 0] = static_cast<std::uint8_t>(c.x * 255.0f + 0.5f);
                 pixels[o + 1] = static_cast<std::uint8_t>(c.y * 255.0f + 0.5f);
                 pixels[o + 2] = static_cast<std::uint8_t>(c.z * 255.0f + 0.5f);
@@ -166,12 +169,15 @@ bool Atlas::build() {
     glGenTextures(1, &m_texture);
     glBindTexture(GL_TEXTURE_2D, m_texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, Size, Size, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                  pixels.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // One mip level: the 2 px padding ring still guards against bleed at 40x40.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 1);
     glBindTexture(GL_TEXTURE_2D, 0);
 
     const GLenum err = glGetError();
@@ -179,7 +185,7 @@ bool Atlas::build() {
         spdlog::error("atlas upload failed, GL error 0x{:04x}", static_cast<unsigned int>(err));
         return false;
     }
-    spdlog::info("atlas built: {}x{} ({} tiles)", size, size, Grid * Grid);
+    spdlog::info("atlas built: {}x{} ({} tiles, padding {})", Size, Size, Grid * Grid, Padding);
     return true;
 }
 
@@ -187,12 +193,12 @@ glm::vec4 Atlas::tileUV(int tile) const {
     const int clamped = std::clamp(tile, 0, Grid * Grid - 1);
     const int tx = clamped % Grid;
     const int ty = clamped / Grid;
-    const float s = 1.0f / static_cast<float>(Grid);
-    const float eps = 0.5f / static_cast<float>(Grid * TileSize);
-    const float u0 = static_cast<float>(tx) * s + eps;
-    const float u1 = static_cast<float>(tx + 1) * s - eps;
-    const float v0 = static_cast<float>(ty) * s + eps;
-    const float v1 = static_cast<float>(ty + 1) * s - eps;
+    const float inv = 1.0f / static_cast<float>(Size);
+    // Half-texel inset: the content occupies texels [p*Pitch+Padding, +TileSize).
+    const float u0 = (static_cast<float>(tx * Pitch + Padding) + 0.5f) * inv;
+    const float u1 = (static_cast<float>(tx * Pitch + Padding + TileSize) - 0.5f) * inv;
+    const float v0 = (static_cast<float>(ty * Pitch + Padding) + 0.5f) * inv;
+    const float v1 = (static_cast<float>(ty * Pitch + Padding + TileSize) - 0.5f) * inv;
     return glm::vec4(u0, v0, u1, v1);
 }
 

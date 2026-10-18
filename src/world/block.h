@@ -13,6 +13,7 @@ enum BlockId : std::uint8_t {
     BLOCK_LOG,
     BLOCK_LEAVES,
     BLOCK_PLANKS,
+    BLOCK_COBBLE,
     BLOCK_WATER,
     BLOCK_COUNT
 };

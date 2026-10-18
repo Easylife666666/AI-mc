@@ -22,7 +22,14 @@ struct MeshData {
     std::vector<std::uint32_t> indices;
 };
 
-// Emits only visible faces (neighbour-aware), in world-space coordinates.
-void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas, MeshData& out);
+struct ChunkMeshData {
+    MeshData opaque;
+    MeshData water;
+};
+
+// Emits only visible faces with per-vertex ambient occlusion. Opaque geometry
+// and water go into separate buffers so water can be drawn transparent.
+void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
+                    ChunkMeshData& out);
 
 }  // namespace aimc

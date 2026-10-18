@@ -13,6 +13,7 @@ const BlockDef kDefs[BLOCK_COUNT] = {
     {"log",         6,   6,    5,  true,  true},   // tile 5 log_side, 6 log_top
     {"leaves",      7,   7,    7,  true,  true},
     {"planks",      8,   8,    8,  true,  true},
+    {"cobble",      9,   9,    9,  true,  true},
     {"water",      10,  10,   10,  false, false},
 };
 
