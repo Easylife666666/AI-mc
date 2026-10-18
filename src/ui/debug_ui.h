@@ -1,6 +1,9 @@
 #pragma once
 
 #include <SDL.h>
+#include <string>
+
+#include "game/settings.h"
 
 namespace aimc {
 
@@ -9,6 +12,14 @@ class World;
 struct DrawStats;
 struct RayHit;
 class Atlas;
+
+struct UiActions {
+    bool saveWorld = false;
+    bool loadWorld = false;
+    bool saveSettings = false;
+    bool toggleFullscreen = false;
+    bool newWorld = false;
+};
 
 class DebugUI {
 public:
@@ -23,7 +34,8 @@ public:
     void processEvent(const SDL_Event& event);
 
     void beginFrame();
-    void draw(const Camera& camera, const World& world, const DrawStats& stats, float dt);
+    UiActions draw(const Camera& camera, const World& world, const DrawStats& stats, float dt,
+                   Settings& settings, float& timeOfDay, const std::string& status);
     void drawHud(const RayHit& hit, const int* hotbarBlocks, int hotbarCount, int selected,
                  const Atlas& atlas, bool flying);
     void endFrame();

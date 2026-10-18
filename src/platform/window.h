@@ -36,6 +36,9 @@ public:
     }
 
     void setRelativeMouse(bool enabled);
+    void setVsync(bool enabled);
+    void setFullscreen(bool enabled);
+    bool fullscreen() const { return m_fullscreen; }
 
 private:
     SDL_Window* m_window = nullptr;
@@ -43,6 +46,7 @@ private:
     int m_width = 0;
     int m_height = 0;
     bool m_shouldClose = false;
+    bool m_fullscreen = false;
 };
 
 }  // namespace aimc

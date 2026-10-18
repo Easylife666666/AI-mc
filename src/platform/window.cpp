@@ -101,4 +101,14 @@ void Window::setRelativeMouse(bool enabled) {
     SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE);
 }
 
+void Window::setVsync(bool enabled) { SDL_GL_SetSwapInterval(enabled ? 1 : 0); }
+
+void Window::setFullscreen(bool enabled) {
+    if (m_window == nullptr) {
+        return;
+    }
+    SDL_SetWindowFullscreen(m_window, enabled ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    m_fullscreen = enabled;
+}
+
 }  // namespace aimc

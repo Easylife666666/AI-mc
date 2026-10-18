@@ -2,3 +2,6 @@ build/
 .ccache/
 compile_commands.json
 *.log
+settings.json
+save.aimc
+*.aimc

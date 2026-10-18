@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 
 #include <SDL.h>
@@ -10,9 +12,11 @@
 #include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 
+#include "audio/audio.h"
 #include "core/log.h"
 #include "game/player.h"
 #include "game/raycast.h"
+#include "game/settings.h"
 #include "platform/window.h"
 #include "render/atlas.h"
 #include "render/camera.h"
@@ -20,9 +24,11 @@
 #include "render/screenshot.h"
 #include "render/selection.h"
 #include "render/shader.h"
+#include "render/sky.h"
 #include "ui/debug_ui.h"
 #include "world/block.h"
 #include "world/chunk.h"
+#include "world/save.h"
 #include "world/world.h"
 
 namespace {
@@ -77,15 +83,30 @@ struct Options {
     int height = 720;
     bool hidden = false;
     bool vsync = true;
+    bool vsyncGiven = false;
     bool hud = true;
+    bool hudGiven = false;
+    bool audioEnabled = true;
+    bool audioGiven = false;
     bool verbose = false;
+    float timeOfDay = 0.42f;
+    float dayLength = 600.0f;
+    bool dayLengthGiven = false;
     int seed = 1337;
+    bool seedGiven = false;
     int viewDistance = 7;
+    bool viewGiven = false;
     int frames = 4;
     float fogStart = -1.0f;
     float fogEnd = -1.0f;
     float benchmark = 0.0f;
+    float quitAfter = 0.0f;
+    bool panel = false;
     std::string shot;
+    std::string savePath = "save.aimc";
+    std::string loadPath;
+    bool newWorld = false;
+    bool autosave = true;
     bool hasCamera = false;
     aimc::Camera camera;
     bool showHelp = false;
@@ -93,30 +114,38 @@ struct Options {
 
 void printUsage(const char* argv0) {
     std::printf(
-        "AI-mc -- voxel sandbox (M3)\n"
+        "AI-mc -- voxel sandbox (M5)\n"
         "\n"
         "usage: %s [options]\n"
         "  --width N          window width  (default 1280)\n"
         "  --height N         window height (default 720)\n"
         "  --view N           view distance in chunks (default 7)\n"
         "  --radius N         alias for --view\n"
-        "  --seed N           world seed    (default 1337)\n"
+        "  --seed N           world seed for a new world (default 1337)\n"
+        "  --new              ignore save.aimc and start a new world\n"
+        "  --load PATH        load a save file\n"
+        "  --save PATH        save file used by F5 / autosave (default save.aimc)\n"
+        "  --no-autosave      do not save on exit\n"
         "  --cam x,y,z,yaw,pitch\n"
         "                     fixed camera pose (screenshot mode)\n"
         "  --shot PATH        render, save a PNG, then exit\n"
         "  --frames N         frames to render before the screenshot (default 4)\n"
         "  --fog start,end    fog range in blocks (default: derived from --view)\n"
+        "  --time T           time of day 0..1 (0.25 sunrise, 0.5 noon, 0.75 sunset)\n"
+        "  --day-length N     seconds per in-game day, 0 freezes time (default 600)\n"
         "  --benchmark N      run N seconds, print average fps, then exit\n"
-        "  --hidden           create a hidden window (screenshot mode)\n"
+        "  --quit-after N     quit cleanly after N seconds (used for tests)\n"
+        "  --panel            show the debug panel in screenshot mode\n"
+        "  --hidden           create a hidden window\n"
         "  --no-vsync         disable vsync\n"
         "  --no-hud           hide crosshair and hotbar\n"
-        "  --verbose          debug logging (player state, chunks)\n"
+        "  --no-audio         disable sound output\n"
+        "  --verbose          debug logging\n"
         "  --help             this text\n"
         "\n"
-        "controls:\n"
-        "  WASD move   Space jump/fly up   Shift sprint/fly fast   F toggle fly\n"
-        "  Ctrl/C down (fly)   LMB break   RMB place   1-9 / wheel select block\n"
-        "  F1 panel    Esc quit\n",
+        "controls: WASD move, Space jump, Shift sprint, F fly, Ctrl down (fly),\n"
+        "          LMB break, RMB place, 1-9/wheel select, F1 panel, F5 save,\n"
+        "          F9 load, M mute, Esc quit\n",
         argv0);
 }
 
@@ -137,8 +166,18 @@ Options parseArgs(int argc, char** argv) {
             opt.height = std::stoi(nextValue());
         } else if (arg == "--view" || arg == "--radius") {
             opt.viewDistance = std::stoi(nextValue());
+            opt.viewGiven = true;
         } else if (arg == "--seed") {
             opt.seed = std::stoi(nextValue());
+            opt.seedGiven = true;
+        } else if (arg == "--new") {
+            opt.newWorld = true;
+        } else if (arg == "--load") {
+            opt.loadPath = nextValue();
+        } else if (arg == "--save") {
+            opt.savePath = nextValue();
+        } else if (arg == "--no-autosave") {
+            opt.autosave = false;
         } else if (arg == "--frames") {
             opt.frames = std::stoi(nextValue());
         } else if (arg == "--shot") {
@@ -152,14 +191,28 @@ Options parseArgs(int argc, char** argv) {
             } else {
                 spdlog::warn("--fog expects start,end with end > start");
             }
+        } else if (arg == "--time") {
+            opt.timeOfDay = std::stof(nextValue());
+        } else if (arg == "--day-length") {
+            opt.dayLength = std::stof(nextValue());
+            opt.dayLengthGiven = true;
         } else if (arg == "--benchmark") {
             opt.benchmark = std::stof(nextValue());
+        } else if (arg == "--quit-after") {
+            opt.quitAfter = std::stof(nextValue());
+        } else if (arg == "--panel") {
+            opt.panel = true;
         } else if (arg == "--hidden") {
             opt.hidden = true;
         } else if (arg == "--no-vsync") {
             opt.vsync = false;
+            opt.vsyncGiven = true;
         } else if (arg == "--no-hud") {
             opt.hud = false;
+            opt.hudGiven = true;
+        } else if (arg == "--no-audio") {
+            opt.audioEnabled = false;
+            opt.audioGiven = true;
         } else if (arg == "--verbose") {
             opt.verbose = true;
         } else if (arg == "--cam") {
@@ -183,6 +236,8 @@ Options parseArgs(int argc, char** argv) {
     opt.height = std::clamp(opt.height, 120, 2160);
     opt.viewDistance = std::clamp(opt.viewDistance, 2, 12);
     opt.frames = std::clamp(opt.frames, 1, 600);
+    opt.timeOfDay = std::clamp(opt.timeOfDay, 0.0f, 0.9999f);
+    opt.dayLength = std::clamp(opt.dayLength, 0.0f, 86400.0f);
     return opt;
 }
 
@@ -200,12 +255,31 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    aimc::Settings settings;
+    aimc::loadSettings("settings.json", settings);
+    if (opt.viewGiven) {
+        settings.viewDistance = opt.viewDistance;
+    }
+    if (opt.vsyncGiven) {
+        settings.vsync = opt.vsync;
+    }
+    if (opt.audioGiven) {
+        settings.audio = opt.audioEnabled;
+    }
+    if (opt.hudGiven) {
+        settings.hud = opt.hud;
+    }
+    if (opt.dayLengthGiven) {
+        settings.dayLength = opt.dayLength;
+    }
+    settings.viewDistance = std::clamp(settings.viewDistance, 3, 10);
+
     aimc::Window window;
     aimc::WindowConfig windowConfig;
     windowConfig.width = opt.width;
     windowConfig.height = opt.height;
     windowConfig.hidden = opt.hidden;
-    windowConfig.vsync = opt.vsync;
+    windowConfig.vsync = settings.vsync;
     if (!window.init(windowConfig)) {
         return 1;
     }
@@ -215,12 +289,32 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    const std::string savePath = !opt.loadPath.empty() ? opt.loadPath : opt.savePath;
+    const bool autoLoad = !opt.newWorld && !opt.seedGiven && opt.benchmark <= 0.0f &&
+                          opt.shot.empty();
+    const bool wantsLoad = !opt.loadPath.empty() || autoLoad;
+
+    aimc::SaveData saveData;
+    bool loaded = false;
+    if (wantsLoad) {
+        if (std::filesystem::exists(savePath)) {
+            loaded = aimc::loadWorld(savePath, saveData);
+        } else if (!opt.loadPath.empty()) {
+            spdlog::warn("save file not found: {}", savePath);
+        }
+    }
+
     aimc::World world;
-    world.init(opt.seed);
+    world.init(loaded ? saveData.seed : opt.seed);
     world.setAtlas(&atlas);
 
     aimc::Shader shader;
     if (!shader.compile(kVertexShader, kFragmentShader)) {
+        return 1;
+    }
+
+    aimc::Sky sky;
+    if (!sky.init()) {
         return 1;
     }
 
@@ -233,25 +327,42 @@ int main(int argc, char** argv) {
     if (!ui.init(window.handle(), window.context())) {
         return 1;
     }
+    if (!opt.shot.empty() && !opt.panel) {
+        ui.toggle();  // clean vista screenshots unless --panel is given
+    }
 
-    aimc::Camera camera = opt.camera;
-    if (!opt.hasCamera) {
+    aimc::Audio audio;
+    if (settings.audio && !audio.init()) {
+        spdlog::warn("continuing without audio");
+    }
+
+    aimc::Camera camera;
+    aimc::Player player;
+    int selected = 0;
+    float timeOfDay = opt.timeOfDay;
+
+    if (loaded) {
+        world.restoreEdits(std::move(saveData.edits), saveData.seed);
+        player.setPosition(saveData.playerPos);
+        camera.pos = player.eyePosition();
+        camera.yawDeg = saveData.yaw;
+        camera.pitchDeg = saveData.pitch;
+        selected = std::clamp(saveData.selected, 0, 8);
+        timeOfDay = saveData.timeOfDay;
+    } else {
         camera.pos = glm::vec3(0.5f, 70.0f, 0.5f);
         camera.yawDeg = -90.0f;
         camera.pitchDeg = -18.0f;
     }
 
     const auto prewarmStart = std::chrono::steady_clock::now();
-    world.prewarm(camera.pos, opt.viewDistance, 30000);
-    const auto prewarmMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() - prewarmStart)
-                               .count();
-    spdlog::info("prewarm finished in {} ms", prewarmMs);
+    world.prewarm(camera.pos, settings.viewDistance, 30000);
+    spdlog::info("prewarm finished in {} ms",
+                 std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - prewarmStart)
+                     .count());
 
-    aimc::Player player;
-    if (opt.hasCamera) {
-        player.setPosition(camera.pos - glm::vec3(0.0f, aimc::Player::EyeHeight, 0.0f));
-    } else {
+    if (!loaded) {
         int surface = world.surfaceY(0, 0);
         if (surface < 0) {
             surface = 40;
@@ -260,15 +371,16 @@ int main(int argc, char** argv) {
                world.getBlock(0, surface + 1, 0) != aimc::BLOCK_AIR) {
             ++surface;
         }
-        const glm::vec3 feet(0.5f, static_cast<float>(surface) + 1.001f, 0.5f);
-        player.setPosition(feet);
+        player.setPosition(glm::vec3(0.5f, static_cast<float>(surface) + 1.001f, 0.5f));
         camera.pos = player.eyePosition();
     }
 
-    const bool interactive = opt.shot.empty();
-    if (interactive) {
-        window.setRelativeMouse(true);
+    if (opt.hasCamera) {
+        camera = opt.camera;
+        player.setPosition(camera.pos - glm::vec3(0.0f, aimc::Player::EyeHeight, 0.0f));
     }
+
+    const bool interactive = opt.shot.empty();
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
@@ -276,33 +388,77 @@ int main(int argc, char** argv) {
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
-    const glm::vec3 skyColor(0.53f, 0.72f, 0.95f);
-    float fogEnd = opt.fogEnd;
-    float fogStart = opt.fogStart;
-    if (fogEnd <= fogStart) {
-        fogEnd = static_cast<float>(opt.viewDistance) * aimc::Chunk::SX * 0.95f;
-        fogStart = fogEnd * 0.45f;
-    }
-    const glm::vec2 fogRange(fogStart, fogEnd);
-
     std::array<int, 9> hotbar = {
-        aimc::BLOCK_GRASS, aimc::BLOCK_DIRT,  aimc::BLOCK_STONE,
-        aimc::BLOCK_SAND,  aimc::BLOCK_LOG,   aimc::BLOCK_LEAVES,
+        aimc::BLOCK_GRASS,  aimc::BLOCK_DIRT,   aimc::BLOCK_STONE,
+        aimc::BLOCK_SAND,   aimc::BLOCK_LOG,    aimc::BLOCK_LEAVES,
         aimc::BLOCK_PLANKS, aimc::BLOCK_COBBLE, aimc::BLOCK_WATER,
     };
-    int selected = 0;
 
+    std::string status =
+        loaded ? "loaded " + savePath : "new world, seed " + std::to_string(world.seed());
+    bool mouseCaptured = false;
+    bool muted = false;
+    bool appliedVsync = settings.vsync;
     bool running = true;
+    const auto wallStart = std::chrono::steady_clock::now();
     int frame = 0;
     double benchElapsed = 0.0;
     int benchFrames = 0;
     double physicsAccumulator = 0.0;
+    float smoothedMs = 16.7f;
+    float adaptTimer = 0.0f;
     auto last = std::chrono::steady_clock::now();
+
+    const auto saveGame = [&](const std::string& path) -> bool {
+        aimc::SaveData data;
+        data.seed = world.seed();
+        data.playerPos = player.position();
+        data.yaw = camera.yawDeg;
+        data.pitch = camera.pitchDeg;
+        data.selected = selected;
+        data.timeOfDay = timeOfDay;
+        data.edits = world.snapshotEdits();
+        return aimc::saveWorld(path, data);
+    };
+
+    const auto loadGame = [&](const std::string& path) -> bool {
+        aimc::SaveData data;
+        if (!aimc::loadWorld(path, data)) {
+            return false;
+        }
+        world.restoreEdits(std::move(data.edits), data.seed);
+        player.setPosition(data.playerPos);
+        camera.pos = player.eyePosition();
+        camera.yawDeg = data.yaw;
+        camera.pitchDeg = data.pitch;
+        selected = std::clamp(data.selected, 0, 8);
+        timeOfDay = data.timeOfDay;
+        world.prewarm(camera.pos, settings.viewDistance, 30000);
+        return true;
+    };
+
+    const auto newWorld = [&]() {
+        world.reset(opt.seed);
+        camera.pos = glm::vec3(0.5f, 70.0f, 0.5f);
+        world.prewarm(camera.pos, settings.viewDistance, 30000);
+        int surface = world.surfaceY(0, 0);
+        if (surface < 0) {
+            surface = 40;
+        }
+        player.setPosition(glm::vec3(0.5f, static_cast<float>(surface) + 1.001f, 0.5f));
+        camera.pos = player.eyePosition();
+        camera.yawDeg = -90.0f;
+        camera.pitchDeg = -18.0f;
+        selected = 0;
+        timeOfDay = 0.42f;
+    };
 
     while (running) {
         bool clickBreak = false;
         bool clickPlace = false;
         bool clickPick = false;
+        bool requestSave = false;
+        bool requestLoad = false;
 
         const auto now = std::chrono::steady_clock::now();
         const float rawDt = std::chrono::duration<float>(now - last).count();
@@ -320,20 +476,30 @@ int main(int argc, char** argv) {
             if (event.type == SDL_KEYDOWN && event.key.repeat == 0) {
                 const SDL_Keycode key = event.key.keysym.sym;
                 if (key == SDLK_ESCAPE) {
-                    running = false;
+                    if (ui.visible()) {
+                        ui.toggle();
+                    } else {
+                        running = false;
+                    }
                 } else if (key == SDLK_F1) {
                     ui.toggle();
+                } else if (key == SDLK_F5) {
+                    requestSave = true;
+                } else if (key == SDLK_F9) {
+                    requestLoad = true;
                 } else if (key == SDLK_f && interactive) {
                     player.toggleFlying();
+                } else if (key == SDLK_m) {
+                    muted = !muted;
                 } else if (key >= SDLK_1 && key <= SDLK_9) {
                     selected = key - SDLK_1;
                 }
             }
-            if (event.type == SDL_MOUSEWHEEL && interactive) {
+            if (event.type == SDL_MOUSEWHEEL && interactive && !ui.visible()) {
                 selected = (selected - event.wheel.y + static_cast<int>(hotbar.size())) %
                            static_cast<int>(hotbar.size());
             }
-            if (event.type == SDL_MOUSEBUTTONDOWN && interactive) {
+            if (event.type == SDL_MOUSEBUTTONDOWN && interactive && !ui.visible()) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     clickBreak = true;
                 } else if (event.button.button == SDL_BUTTON_RIGHT) {
@@ -344,7 +510,15 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (interactive) {
+        const bool wantCapture = interactive && !ui.visible();
+        if (wantCapture != mouseCaptured) {
+            window.setRelativeMouse(wantCapture);
+            mouseCaptured = wantCapture;
+        }
+
+        camera.fovDeg = settings.fov;
+
+        if (interactive && !ui.visible()) {
             aimc::PlayerInput input;
             const Uint8* keys = SDL_GetKeyboardState(nullptr);
             input.forward = keys[SDL_SCANCODE_W] != 0;
@@ -359,10 +533,13 @@ int main(int argc, char** argv) {
             int mouseX = 0;
             int mouseY = 0;
             SDL_GetRelativeMouseState(&mouseX, &mouseY);
-            constexpr float kSensitivity = 0.10f;
-            camera.yawDeg += static_cast<float>(mouseX) * kSensitivity;
-            camera.pitchDeg -= static_cast<float>(mouseY) * kSensitivity;
+            camera.yawDeg += static_cast<float>(mouseX) * settings.sensitivity;
+            camera.pitchDeg -= static_cast<float>(mouseY) * settings.sensitivity;
             camera.pitchDeg = std::clamp(camera.pitchDeg, -89.0f, 89.0f);
+
+            if (settings.dayLength > 0.0f) {
+                timeOfDay = std::fmod(timeOfDay + dt / settings.dayLength, 1.0f);
+            }
 
             constexpr double kFixedStep = 1.0 / 120.0;
             physicsAccumulator += static_cast<double>(dt);
@@ -371,6 +548,15 @@ int main(int argc, char** argv) {
                 player.update(world, camera.yawDeg, input, static_cast<float>(kFixedStep));
                 physicsAccumulator -= kFixedStep;
                 ++steps;
+                if (player.consumeStep()) {
+                    audio.play(aimc::Audio::Sound::Step, 0.45f);
+                }
+                if (player.consumeJump()) {
+                    audio.play(aimc::Audio::Sound::Jump, 0.5f);
+                }
+                if (player.consumeLand()) {
+                    audio.play(aimc::Audio::Sound::Land, 0.7f);
+                }
             }
             camera.pos = player.eyePosition();
 
@@ -382,9 +568,35 @@ int main(int argc, char** argv) {
                 player.setPosition(glm::vec3(0.5f, static_cast<float>(surface) + 1.001f, 0.5f));
                 camera.pos = player.eyePosition();
             }
+        } else {
+            physicsAccumulator = 0.0;
         }
 
-        world.update(camera.pos, opt.viewDistance, true);
+        smoothedMs = smoothedMs * 0.95f + rawDt * 1000.0f * 0.05f;
+        if (settings.adaptive && interactive && opt.benchmark <= 0.0f) {
+            adaptTimer += dt;
+            if (adaptTimer >= 2.0f) {
+                adaptTimer = 0.0f;
+                if (smoothedMs > 22.0f && settings.viewDistance > 3) {
+                    --settings.viewDistance;
+                    status = "adaptive: view distance " + std::to_string(settings.viewDistance);
+                } else if (smoothedMs < 13.0f && settings.viewDistance < 10) {
+                    ++settings.viewDistance;
+                    status = "adaptive: view distance " + std::to_string(settings.viewDistance);
+                }
+            }
+        }
+
+        const float effectiveVolume = muted ? 0.0f : settings.volume;
+        if (std::abs(audio.volume() - effectiveVolume) > 0.001f) {
+            audio.setVolume(effectiveVolume);
+        }
+        if (appliedVsync != settings.vsync) {
+            window.setVsync(settings.vsync);
+            appliedVsync = settings.vsync;
+        }
+
+        world.update(camera.pos, settings.viewDistance, true);
 
         const auto blockGetter = [&world](int x, int y, int z) -> aimc::BlockId {
             const aimc::BlockId block = world.getBlock(x, y, z);
@@ -393,14 +605,15 @@ int main(int argc, char** argv) {
         const aimc::RayHit hit =
             aimc::raycastVoxel(blockGetter, camera.pos, camera.forward(), 6.0f);
 
-        if (interactive && !ui.wantsMouse()) {
+        if (interactive && !ui.visible()) {
             if (clickBreak && hit.hit) {
-                world.setBlock(hit.block.x, hit.block.y, hit.block.z, aimc::BLOCK_AIR);
+                if (world.setBlock(hit.block.x, hit.block.y, hit.block.z, aimc::BLOCK_AIR)) {
+                    audio.play(aimc::Audio::Sound::Break, 0.8f);
+                }
             }
             if (clickPlace && hit.hit) {
                 const glm::ivec3 target = hit.block + hit.normal;
-                const aimc::BlockId existing =
-                    world.getBlock(target.x, target.y, target.z);
+                const aimc::BlockId existing = world.getBlock(target.x, target.y, target.z);
                 if (existing == aimc::BLOCK_AIR || existing == aimc::BLOCK_WATER) {
                     const glm::vec3 pmin = player.position() - glm::vec3(0.3f, 0.0f, 0.3f);
                     const glm::vec3 pmax = player.position() + glm::vec3(0.3f, 1.8f, 0.3f);
@@ -412,8 +625,10 @@ int main(int argc, char** argv) {
                         static_cast<float>(target.z) < pmax.z &&
                         static_cast<float>(target.z + 1) > pmin.z;
                     if (!overlaps) {
-                        world.setBlock(target.x, target.y, target.z,
-                                       static_cast<aimc::BlockId>(hotbar[selected]));
+                        if (world.setBlock(target.x, target.y, target.z,
+                                           static_cast<aimc::BlockId>(hotbar[selected]))) {
+                            audio.play(aimc::Audio::Sound::Place, 0.7f);
+                        }
                     }
                 }
             }
@@ -429,11 +644,11 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (interactive && frame % 60 == 0) {
-            const glm::vec3 p = player.position();
-            spdlog::debug("player {:.2f},{:.2f},{:.2f} vy={:.2f} ground={} fly={} water={}", p.x,
-                          p.y, p.z, player.velocity().y, player.onGround(), player.flying(),
-                          player.inWater());
+        if (requestSave) {
+            status = saveGame(opt.savePath) ? "saved " + opt.savePath : "save failed";
+        }
+        if (requestLoad) {
+            status = loadGame(savePath) ? "loaded " + savePath : "load failed";
         }
 
         ui.beginFrame();
@@ -441,18 +656,41 @@ int main(int argc, char** argv) {
         const int width = window.width();
         const int height = window.height();
         glViewport(0, 0, width, height);
-        glClearColor(skyColor.x, skyColor.y, skyColor.z, 1.0f);
+
+        const aimc::SkyState skyState = aimc::computeSky(timeOfDay);
+        glm::vec3 fogColor = skyState.fogColor;
+        glm::vec2 fogRange;
+        if (opt.fogStart >= 0.0f && opt.fogEnd > opt.fogStart) {
+            fogRange = glm::vec2(opt.fogStart, opt.fogEnd);
+        } else {
+            const float end = static_cast<float>(settings.viewDistance) * aimc::Chunk::SX * 0.95f;
+            fogRange = glm::vec2(end * 0.55f, end);
+        }
+        float lightScale = skyState.light;
+
+        if (interactive &&
+            world.getBlock(static_cast<int>(std::floor(camera.pos.x)),
+                           static_cast<int>(std::floor(camera.pos.y)),
+                           static_cast<int>(std::floor(camera.pos.z))) == aimc::BLOCK_WATER) {
+            fogRange = glm::vec2(0.5f, 18.0f);
+            fogColor = glm::vec3(0.06f, 0.22f, 0.34f) * (0.4f + 0.6f * skyState.dayFactor);
+            lightScale *= 0.75f;
+        }
+
+        glClearColor(skyState.horizon.x, skyState.horizon.y, skyState.horizon.z, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         const glm::mat4 viewProj = camera.viewProj(window.aspect());
         const aimc::Frustum frustum = aimc::Frustum::fromViewProj(viewProj);
 
+        sky.draw(camera, glm::inverse(viewProj), skyState);
+
         shader.use();
         shader.setMat4("uViewProj", viewProj);
         shader.setVec3("uCamPos", camera.pos);
-        shader.setVec3("uFogColor", skyColor);
+        shader.setVec3("uFogColor", fogColor);
         shader.setVec2("uFog", fogRange);
-        shader.setFloat("uLight", 1.0f);
+        shader.setFloat("uLight", lightScale);
         shader.setFloat("uAlpha", 1.0f);
         shader.setInt("uAtlas", 0);
         glActiveTexture(GL_TEXTURE0);
@@ -474,17 +712,42 @@ int main(int argc, char** argv) {
         stats.drawCalls += waterStats.drawCalls;
         stats.triangles += waterStats.triangles;
 
-        if (opt.hud && hit.hit) {
+        if (settings.hud && hit.hit) {
             selection.draw(viewProj, hit.block);
         }
 
         const float uiDt = opt.shot.empty() ? dt : (1.0f / 60.0f);
-        ui.draw(camera, world, stats, uiDt);
-        if (opt.hud) {
+        const aimc::UiActions actions =
+            ui.draw(camera, world, stats, uiDt, settings, timeOfDay, status);
+        if (settings.hud) {
             ui.drawHud(hit, hotbar.data(), static_cast<int>(hotbar.size()), selected, atlas,
                        player.flying());
         }
         ui.endFrame();
+
+        if (actions.saveWorld) {
+            status = saveGame(opt.savePath) ? "saved " + opt.savePath : "save failed";
+        }
+        if (actions.loadWorld) {
+            status = loadGame(savePath) ? "loaded " + savePath : "load failed";
+        }
+        if (actions.saveSettings) {
+            status = aimc::saveSettings("settings.json", settings) ? "settings saved"
+                                                                   : "settings save failed";
+        }
+        if (actions.toggleFullscreen) {
+            window.setFullscreen(!window.fullscreen());
+        }
+        if (actions.newWorld) {
+            newWorld();
+            status = "new world, seed " + std::to_string(world.seed());
+        }
+
+        if (opt.quitAfter > 0.0f &&
+            std::chrono::duration<float>(std::chrono::steady_clock::now() - wallStart).count() >=
+                opt.quitAfter) {
+            running = false;
+        }
 
         ++frame;
         benchElapsed += static_cast<double>(rawDt);
@@ -506,11 +769,22 @@ int main(int argc, char** argv) {
         window.swapBuffers();
     }
 
+    if (interactive && opt.autosave && opt.benchmark <= 0.0f) {
+        if (saveGame(opt.savePath)) {
+            spdlog::info("autosaved to {}", opt.savePath);
+        }
+    }
+    if (interactive && opt.benchmark <= 0.0f) {
+        aimc::saveSettings("settings.json", settings);
+    }
+
     ui.shutdown();
+    audio.shutdown();
     selection.shutdown();
     world.shutdown();
+    sky.shutdown();
     shader.destroy();
-    if (interactive) {
+    if (mouseCaptured) {
         window.setRelativeMouse(false);
     }
     return 0;

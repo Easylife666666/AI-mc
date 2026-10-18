@@ -17,7 +17,10 @@ find_package(glm REQUIRED)
 find_package(TBB REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(GTest REQUIRED)
+find_package(ZLIB REQUIRED)
+find_package(nlohmann_json REQUIRED)
 pkg_check_modules(GLEW REQUIRED IMPORTED_TARGET glew)
+pkg_check_modules(MINIAUDIO REQUIRED IMPORTED_TARGET miniaudio)
 
 # ---- vendored Dear ImGui -------------------------------------------------
 set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
@@ -35,7 +38,9 @@ target_compile_features(imgui PUBLIC cxx_std_17)
 
 # ---- engine core (no window needed for logic tests) ----------------------
 add_library(aimc_core STATIC
+  src/audio/audio.cpp
   src/game/player.cpp
+  src/game/settings.cpp
   src/game/raycast.cpp
   src/platform/window.cpp
   src/render/atlas.cpp
@@ -44,9 +49,11 @@ add_library(aimc_core STATIC
   src/render/frustum.cpp
   src/render/selection.cpp
   src/render/shader.cpp
+  src/render/sky.cpp
   src/render/screenshot.cpp
   src/world/block.cpp
   src/world/chunk.cpp
+  src/world/save.cpp
   src/world/terrain.cpp
   src/world/world.cpp
   src/ui/debug_ui.cpp
@@ -63,6 +70,9 @@ target_link_libraries(aimc_core PUBLIC
   OpenGL::GL
   spdlog::spdlog
   TBB::tbb
+  PkgConfig::MINIAUDIO
+  ZLIB::ZLIB
+  nlohmann_json::nlohmann_json
 )
 target_compile_options(aimc_core PRIVATE -Wall -Wextra -Wpedantic)
 

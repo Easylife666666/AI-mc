@@ -1,8 +1,12 @@
+#include <chrono>
 #include <set>
+#include <thread>
 
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+
+#include <cstdio>
 
 #include "core/math.h"
 #include "game/raycast.h"
@@ -12,7 +16,9 @@
 #include "world/block.h"
 #include "world/chunk.h"
 #include "world/terrain.h"
+#include "world/save.h"
 #include "world/world.h"
+#include "game/settings.h"
 
 namespace {
 
@@ -228,6 +234,79 @@ TEST(Raycast, VerticalHitNormal) {
     EXPECT_TRUE(hit.hit);
     EXPECT_EQ(hit.block, glm::ivec3(0, -2, 0));
     EXPECT_EQ(hit.normal, glm::ivec3(0, 1, 0));
+}
+
+TEST(Save, RoundtripPreservesData) {
+    SaveData data;
+    data.seed = 4242;
+    data.playerPos = glm::vec3(12.5f, 30.25f, -4.75f);
+    data.yaw = 45.0f;
+    data.pitch = -12.0f;
+    data.selected = 6;
+    data.timeOfDay = 0.625f;
+    data.edits[0x0000000100000002ull][123] = static_cast<std::uint8_t>(BLOCK_STONE);
+
+    ASSERT_TRUE(saveWorld("aimc_test_save.aimc", data));
+
+    SaveData loaded;
+    ASSERT_TRUE(loadWorld("aimc_test_save.aimc", loaded));
+    std::remove("aimc_test_save.aimc");
+
+    EXPECT_EQ(loaded.seed, 4242);
+    EXPECT_FLOAT_EQ(loaded.playerPos.x, 12.5f);
+    EXPECT_FLOAT_EQ(loaded.playerPos.y, 30.25f);
+    EXPECT_FLOAT_EQ(loaded.playerPos.z, -4.75f);
+    EXPECT_FLOAT_EQ(loaded.yaw, 45.0f);
+    EXPECT_FLOAT_EQ(loaded.pitch, -12.0f);
+    EXPECT_EQ(loaded.selected, 6);
+    EXPECT_FLOAT_EQ(loaded.timeOfDay, 0.625f);
+    ASSERT_EQ(loaded.edits.size(), 1u);
+    ASSERT_EQ(loaded.edits.begin()->second.size(), 1u);
+    EXPECT_EQ(loaded.edits.begin()->second.at(123), static_cast<std::uint8_t>(BLOCK_STONE));
+}
+
+TEST(Settings, RoundtripClamps) {
+    Settings settings;
+    settings.viewDistance = 9;
+    settings.fov = 85.0f;
+    settings.volume = 0.25f;
+    settings.dayLength = 120.0f;
+    settings.adaptive = false;
+    ASSERT_TRUE(saveSettings("aimc_test_settings.json", settings));
+
+    Settings loaded;
+    ASSERT_TRUE(loadSettings("aimc_test_settings.json", loaded));
+    std::remove("aimc_test_settings.json");
+
+    EXPECT_EQ(loaded.viewDistance, 9);
+    EXPECT_FLOAT_EQ(loaded.fov, 85.0f);
+    EXPECT_FLOAT_EQ(loaded.volume, 0.25f);
+    EXPECT_FLOAT_EQ(loaded.dayLength, 120.0f);
+    EXPECT_FALSE(loaded.adaptive);
+}
+
+TEST(World, StreamingGenerationAndBlockEdits) {
+    Atlas atlas;
+    World world;
+    world.init(123);
+    world.setAtlas(&atlas);
+    world.update(glm::vec3(0.5f, 30.0f, 0.5f), 1, false);
+
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_EQ(world.getBlock(0, 0, 0), BLOCK_STONE);
+    EXPECT_GE(world.chunkCount(), 9u);
+
+    const int surface = world.surfaceY(0, 0);
+    ASSERT_GE(surface, 0);
+    const BlockId before = world.getBlock(0, surface, 0);
+    ASSERT_NE(before, BLOCK_AIR);
+
+    ASSERT_TRUE(world.setBlock(0, surface, 0, BLOCK_AIR));
+    EXPECT_EQ(world.getBlock(0, surface, 0), BLOCK_AIR);
+    EXPECT_FALSE(world.snapshotEdits().empty());
+    EXPECT_FALSE(world.setBlock(10000, 0, 10000, BLOCK_STONE));
 }
 
 TEST(World, EmptyWorldQueriesAreSafe) {

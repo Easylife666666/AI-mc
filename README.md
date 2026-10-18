@@ -1,10 +1,34 @@
 # AI-mc
 
-一个用 **C++20 + OpenGL 3.3** 从零搭的体素沙盒（Minecraft 风格），不依赖任何游戏引擎。窗口/输入用 SDL2，ImGui 做调试面板，FastNoiseLite 生成地形。
+一个用 **C++20 + OpenGL 3.3** 从零搭的体素沙盒（Minecraft 风格），不依赖游戏引擎。
+窗口/输入用 SDL2，调试面板用 Dear ImGui，地形用 FastNoiseLite，音频用 miniaudio，
+存档压缩用 zlib。
 
-当前进度：**M0 + M1 完成** —— 可自由飞行的无限风格地形（有限世界，M2 转流式），程序化贴图，面剔除网格，雾，帧率面板。
+**M0–M5 全部完成**：流式世界、多线程网格构建、玩家物理、破坏/放置、AO、昼夜、音效、
+存档与设置面板。
 
-![M1 截图](docs/m1.png)
+![M2 vista](docs/m2.png)
+
+## 功能
+
+- **流式世界**：以玩家为中心动态加载/卸载 `16 x 64 x 16` 区块，无限水平延伸
+- **后台线程**：TBB 并行地形生成与网格构建，主线程只负责 GL 上传（每帧预算 8 个）
+- **渲染**：视锥剔除、距离雾、程序化 4×4 贴图集（带 padding + mipmap）、顶点 AO、
+  半透明水面独立 pass、天空穹顶 + 太阳 + 星空
+- **地形**：OpenSimplex2 + 4 层 fBm，海平面/沙滩/草地/水体，跨区块确定性树木
+- **玩法**：AABB 玩家物理（重力/跳跃/游泳/创造飞行）、DDA 射线拾取、
+  破坏/放置/取色、选中描边、9 格热键栏
+- **时间**：昼夜循环、日落暖色、夜间星空与全局光照衰减
+- **音频**：程序化合成的脚步/破坏/放置/跳跃/落地点击声（miniaudio 3D 无关，纯 2D 混音）
+- **存档**：zlib 压缩的二进制格式，只保存玩家编辑 diff + 玩家状态，`F5`/`F9`/退出自动存档
+- **设置**：视距、FOV、灵敏度、音量、昼夜长度、VSync、HUD、自适应视距
+
+## 截图
+
+| | |
+|---|---|
+| ![M3](docs/m3.png) **M3** 破坏/放置 · 选中描边 · 热键栏 | ![M4](docs/m4.png) **M4** 日落天空 |
+| ![M5](docs/m5.png) **M5** 设置面板 + HUD | ![M1](docs/m1.png) **M1** 最早的原型 |
 
 ## 依赖
 
@@ -12,85 +36,112 @@ Arch Linux：
 
 ```bash
 sudo pacman -S --needed pkgconf cmake ninja ccache gdb \
-  sdl2 glew glm stb spdlog fmt gtest
+  sdl2 glew glm stb spdlog fmt nlohmann-json gtest \
+  miniaudio zlib
 ```
 
 Dear ImGui 与 FastNoiseLite 已 vendored 在 `third_party/`（可用 `scripts/fetch_thirdparty.sh` 重新下载）。
 
-## 构建
+## 构建与运行
 
 ```bash
 cmake -S . -B build -G Ninja
-cmake --build build          # 可加 -j$(nproc)
+cmake --build build -j$(nproc)
+
+./build/aimc                         # 默认 1280x720，打开设置面板
+./build/aimc --view 8 --seed 42 --new
+./build/aimc --benchmark 10 --no-vsync
+./build/aimc --shot shot.png --hidden --width 1280 --height 720 --no-hud
 ```
 
-## 运行
+控制：
 
-```bash
-./build/aimc                  # 1280x720，自由飞行
-./build/aimc --radius 6       # 更大的世界
-./build/aimc --seed 42        # 换地形
+| 按键 | 作用 |
+|---|---|
+| `WASD` / `Space` / `Shift` | 移动 / 跳（飞行时上升）/ 疾跑 |
+| `F` | 切换创造飞行 |
+| 鼠标 | 视角 |
+| 左键 / 右键 / 中键 | 破坏 / 放置 / 取色选块 |
+| `1`–`9` / 滚轮 | 选择方块 |
+| `F1` | 打开/关闭设置面板（打开时释放鼠标） |
+| `F5` / `F9` | 快速存档 / 读档 |
+| `M` | 静音 |
+| `Esc` | 关闭面板；面板已关时退出 |
+
+启动时如果存在 `save.aimc` 会自动读取；`--new` 或 `--seed` 会开新世界。
+
+常用参数：
+
 ```
-
-控制：`WASD` 移动，`Space / Ctrl` 上升下降，`Shift` 加速，`F1` 开关调试面板，`Esc` 退出。
-
-截图（无头，隐藏窗口）：
-
-```bash
-./build/aimc --shot shot.png --hidden --width 960 --height 540
+--view N / --radius N     视距（区块），会覆盖 settings.json
+--seed N --new            新世界
+--load PATH --save PATH   指定存档
+--time T --day-length N   时间 0..1 / 一天秒数（0 冻结）
+--benchmark N             跑 N 秒输出平均帧率
+--shot PATH --hidden      无头截图
+--no-vsync --no-hud --no-audio --verbose
 ```
-
-性能测量（建议关 vsync）：
-
-```bash
-./build/aimc --benchmark 5 --no-vsync
-```
-
-全部参数见 `./build/aimc --help`。
 
 ## 测试
 
 ```bash
 ctest --test-dir build --output-on-failure
-# 或直接 ./build/aimc_tests
 ```
 
-现有 10 个用例：区块索引、负数坐标除法、地形确定性/高度范围、面剔除（单方块 6 面、相邻方块 10 面、不透明邻居剔除）、图集 UV、世界方块查询。
+19 个用例覆盖：区块索引、负数坐标除法、地形确定性与高度范围、树木生成、面剔除/AO 网格、
+水独立缓冲、图集 UV、视锥剔除、DDA 射线、流式生成 + 方块编辑、存档与设置往返。
 
-## 目录
+## 架构
 
 ```
-src/core       数学工具、日志
-src/platform   SDL2 窗口与 GL 上下文
-src/render     shader、程序化图集、区块网格、相机、截图
-src/world      方块表、16x64x16 区块、噪声地形、世界与绘制提交
-src/ui         ImGui 调试面板
-tests          gtest
-third_party    Dear ImGui 1.92.4、FastNoiseLite
+src/audio      miniaudio 设备 + 程序化音效合成
+src/core       数学工具 / 日志
+src/game       Player（AABB 物理）、DDA 射线、Settings
+src/platform   SDL2 窗口 / GL 上下文 / 全屏 / VSync
+src/render     Atlas、ChunkMesh（AO）、Frustum、SelectionBox、Shader、Sky、Screenshot
+src/ui         ImGui 调试面板 + HUD（准星/热键栏）
+src/world      Block、Chunk、Terrain、World（流式 + 线程）、Save（zlib）
 ```
 
-## 实现要点
+### 线程模型
 
-- 区块 `16 x 64 x 16`，`uint8` 方块 id，世界坐标直接烘进顶点，**每个区块一次 draw call**。
-- 网格构建只发生暴露面：同种方块相邻剔除（水-水），不透明邻居剔除。
-- 纹理是**代码生成的 4x4 / 16px 图集**，零美术资源；UV 带半像素内缩防渗色。
-- 地形：FastNoiseLite OpenSimplex2 + 4 层 fBm，海平面 20，沙滩/草地/水。
-- 雾 + 天空色清屏，遮住有限世界边缘（M2 会换成流式加载）。
-- 相机为自由飞行，M3 会换成带 AABB 碰撞的玩家。
+- 区块状态机：`Empty → Generating → Generated → Meshing → Meshed → Ready`
+- TBB `task_group` 在 worker 上生成地形和构建网格；结果进入 `concurrent_queue`
+- 主线程每帧最多上传 8 个网格（GL 上下文单线程）
+- 区块用 `shared_ptr` 持有，网格任务只读；玩家编辑用的 `shared_mutex` 保证数据安全
+- 玩家编辑会 bump 版本号；过期的后台网格结果在 upload 时被丢弃并重新排队
 
-## 已知限制（后续里程碑）
+### 存档格式
 
-- 没有树/植被/生物群系（M2 地形特征）
-- 水是不透明的，没有半透明排序（M4）
-- 世界是有限块状区域，没有流式加载与视锥剔除（M2）
-- 没有顶点 AO、没有 mipmap（M2/M4）
-- 没有存档（M5）
+`AIMC` + version + seed + 玩家位置/朝向 + 时间 + 选中格 + 每区块编辑项，
+整体用 zlib（`gzFile`）压缩。地形由 seed 确定性重建，因此只需保存差异。
+
+## 性能
+
+- 容器内是 **llvmpipe 软件渲染**：1280×720、视距 3 约 14 fps（天空全屏 shader 是主要开销）
+- 你的 **Intel HD 620** 是真硬件加速，预计 1080p 60fps；用下面的命令实测：
+
+```bash
+./build/aimc --benchmark 10 --no-vsync
+```
+
+- 设置面板打开"adaptive view distance"后，帧时间 > 22ms 会自动降视距（最低 3），
+  < 13ms 时回升（最高 10）
+
+## 已知限制
+
+- 单一生物群系，没有洞穴/矿脉/结构
+- 水不流动、无水下折射/焦散
+- 没有生物、合成、红石、方块光照传播（只有 AO + 天光近似）
+- 存档只保存编辑；修改地形生成算法会让旧存档的地形变化
+- 没有区块 LOD、间接绘制、阴影贴图
 
 ## 路线图
 
 - [x] M0 窗口 + 主循环 + ImGui + 截图
 - [x] M1 区块网格 + 程序化图集 + 自由相机 + 雾
-- [ ] M2 流式区块加载 + TBB 后台网格构建 + 视锥剔除 + 树
-- [ ] M3 玩家物理 / 碰撞 / DDA 拾取 / 破坏放置
-- [ ] M4 顶点 AO + 天空昼夜 + 音频
-- [ ] M5 存档（zlib）+ 设置面板 + 性能自适应
+- [x] M2 流式区块 + TBB 后台网格 + 视锥剔除 + 树 + mipmap + AO + 水面
+- [x] M3 玩家物理 / 碰撞 / DDA / 破坏放置 / 高亮 / 热键栏
+- [x] M4 天空昼夜 + 星空 + 程序化音效
+- [x] M5 zlib 存档 + 设置面板 + 自适应视距
+- [ ] 下一步候选：生物群系与洞穴、方块光照传播、LOD、彩色光照、存档版本迁移

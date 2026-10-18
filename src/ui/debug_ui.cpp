@@ -68,39 +68,68 @@ void DebugUI::beginFrame() {
     ImGui::NewFrame();
 }
 
-void DebugUI::draw(const Camera& camera, const World& world, const DrawStats& stats, float dt) {
+UiActions DebugUI::draw(const Camera& camera, const World& world, const DrawStats& stats,
+                          float dt, Settings& settings, float& timeOfDay,
+                          const std::string& status) {
+    UiActions actions;
     if (!m_initialized) {
-        return;
+        return actions;
     }
 
     const float instant = dt > 0.0f ? std::min(1.0f / dt, 999.0f) : 0.0f;
     m_fps = m_fps <= 0.0f ? instant : m_fps * 0.90f + instant * 0.10f;
 
     if (!m_visible) {
-        return;
+        return actions;
     }
 
     ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(350.0f, 0.0f), ImGuiCond_Once);
     if (ImGui::Begin("AI-mc", &m_visible, ImGuiWindowFlags_NoCollapse)) {
         ImGui::Text("FPS  %.1f   (%.2f ms)", m_fps, dt * 1000.0f);
-        ImGui::Separator();
-
         ImGui::Text("camera  %.1f  %.1f  %.1f", camera.pos.x, camera.pos.y, camera.pos.z);
-        ImGui::Text("yaw %.1f   pitch %.1f", camera.yawDeg, camera.pitchDeg);
+        ImGui::Text("chunks  %d / %d visible", stats.visibleChunks, stats.totalChunks);
+        ImGui::Text("draw calls %d   triangles %lld", stats.drawCalls, stats.triangles);
+        ImGui::Text("seed %d   time %.3f", world.seed(), timeOfDay);
         ImGui::Separator();
 
-        ImGui::Text("chunks      %d / %d visible", stats.visibleChunks, stats.totalChunks);
-        ImGui::Text("draw calls  %d", stats.drawCalls);
-        ImGui::Text("triangles   %lld", stats.triangles);
-        ImGui::Text("seed %d", world.seed());
+        ImGui::SliderInt("view distance", &settings.viewDistance, 3, 10);
+        ImGui::Checkbox("adaptive view distance", &settings.adaptive);
+        ImGui::SliderFloat("fov", &settings.fov, 50.0f, 100.0f, "%.0f");
+        ImGui::SliderFloat("sensitivity", &settings.sensitivity, 0.02f, 0.30f, "%.3f");
+        ImGui::SliderFloat("volume", &settings.volume, 0.0f, 1.0f, "%.2f");
+        ImGui::Checkbox("hud", &settings.hud);
+        ImGui::Checkbox("vsync", &settings.vsync);
+        ImGui::SliderFloat("time of day", &timeOfDay, 0.0f, 0.999f, "%.3f");
+        ImGui::SliderFloat("day length (s)", &settings.dayLength, 0.0f, 1800.0f, "%.0f");
         ImGui::Separator();
 
+        if (ImGui::Button("Save world (F5)")) {
+            actions.saveWorld = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Load world (F9)")) {
+            actions.loadWorld = true;
+        }
+        if (ImGui::Button("Save settings")) {
+            actions.saveSettings = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Fullscreen")) {
+            actions.toggleFullscreen = true;
+        }
+        if (ImGui::Button("New world")) {
+            actions.newWorld = true;
+        }
+
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", status.c_str());
         ImGui::TextDisabled("WASD move  Space jump  F fly");
         ImGui::TextDisabled("LMB break  RMB place  1-9 select");
-        ImGui::TextDisabled("F1 panel  Esc quit");
+        ImGui::TextDisabled("F1 close panel and capture mouse  Esc quit");
     }
     ImGui::End();
+    return actions;
 }
 
 void DebugUI::drawHud(const RayHit& hit, const int* hotbarBlocks, int hotbarCount, int selected,
