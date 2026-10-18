@@ -128,11 +128,23 @@ void Player::update(const World& world, float yawDeg, const PlayerInput& input, 
         if (m_inWater) {
             m_velocity.y -= 8.0f * dt;
             if (input.jump) {
-                // In the top water layer allow a real jump so the player can
-                // clear a one-block shore; deeper down it is a gentle swim up.
+                // Gentle swim-up by default. Only grant a real jump when the
+                // player is pushing into a one-block ledge: in open water this
+                // keeps you bobbing at the surface instead of leaping out.
+                float up = 3.4f;
                 const bool topLayer =
                     !isWaterBlock(world, m_pos.x, m_pos.y + 1.0f, m_pos.z);
-                m_velocity.y = std::max(m_velocity.y, topLayer ? kJumpSpeed : 3.4f);
+                if (topLayer && glm::length(glm::vec2(wish.x, wish.z)) > 1.0e-4f) {
+                    const float ahead = Width * 0.5f + 0.25f;
+                    const int px = static_cast<int>(std::floor(m_pos.x + wish.x * ahead));
+                    const int pz = static_cast<int>(std::floor(m_pos.z + wish.z * ahead));
+                    const int footY = static_cast<int>(std::floor(m_pos.y));
+                    if (isSolid(world.getBlock(px, footY + 1, pz)) &&
+                        !isSolid(world.getBlock(px, footY + 2, pz))) {
+                        up = kJumpSpeed;
+                    }
+                }
+                m_velocity.y = std::max(m_velocity.y, up);
             }
             m_velocity.y *= (1.0f - 2.5f * dt);
         } else {

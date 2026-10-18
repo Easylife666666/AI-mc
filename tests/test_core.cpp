@@ -364,6 +364,45 @@ TEST(Player, CanClimbOutOfWater) {
                          << " y=" << player.position().y << " vy=" << player.velocity().y;
 }
 
+TEST(Player, CannotJumpOutInOpenWater) {
+    Atlas atlas;
+    World world;
+    world.init(13);
+    world.setAtlas(&atlas);
+    world.update(glm::vec3(0.5f, 64.0f, 0.5f), 2, false);
+
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_EQ(world.getBlock(0, 0, 0), BLOCK_STONE);
+
+    // Open water: two layers deep, no shore anywhere near the player.
+    for (int z = -10; z <= 10; ++z) {
+        for (int x = -10; x <= 10; ++x) {
+            for (int y = 46; y <= 52; ++y) {
+                world.setBlock(x, y, z, BLOCK_AIR);
+            }
+            world.setBlock(x, 45, z, BLOCK_STONE);
+            world.setBlock(x, 46, z, BLOCK_WATER);
+            world.setBlock(x, 47, z, BLOCK_WATER);
+        }
+    }
+
+    Player player;
+    player.setPosition(glm::vec3(0.5f, 46.2f, 0.5f));
+
+    PlayerInput input;
+    input.forward = true;
+    input.jump = true;
+
+    float maxY = 0.0f;
+    for (int step = 0; step < 300; ++step) {
+        player.update(world, 0.0f, input, 1.0f / 120.0f);
+        maxY = std::max(maxY, player.position().y);
+    }
+    EXPECT_LT(maxY, 48.5f) << "open-water jump reached y=" << maxY;
+}
+
 TEST(World, EmptyWorldQueriesAreSafe) {
     World world;
     world.init(99);
