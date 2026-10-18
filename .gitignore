@@ -1,0 +1,4 @@
+build/
+.ccache/
+compile_commands.json
+*.log
