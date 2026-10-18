@@ -1,6 +1,9 @@
 # AI-mc
 
 > [!NOTE]
+> 暂时停止开发。
+
+> [!NOTE]
 > 本项目由 **DeepSeek-V4.1-Flash** 模型与 **DeepSeek Harness** 智能体协作完成。
 > Built with the **DeepSeek-V4.1-Flash** model and the **DeepSeek Harness** agent.
 
