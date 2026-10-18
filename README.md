@@ -1,5 +1,9 @@
 # AI-mc
 
+> [!NOTE]
+> 本项目由 **DeepSeek-V4.1-Flash** 模型与 **DeepSeek Harness** 智能体协作完成。
+> Built with the **DeepSeek-V4.1-Flash** model and the **DeepSeek Harness** agent.
+
 一个用 **C++20 + OpenGL 3.3** 从零搭的体素沙盒（Minecraft 风格），不依赖游戏引擎。
 窗口/输入用 SDL2，调试面板用 Dear ImGui，地形用 FastNoiseLite，音频用 miniaudio，
 存档压缩用 zlib。
@@ -145,3 +149,10 @@ src/world      Block、Chunk、Terrain、World（流式 + 线程）、Save（zli
 - [x] M4 天空昼夜 + 星空 + 程序化音效
 - [x] M5 zlib 存档 + 设置面板 + 自适应视距
 - [ ] 下一步候选：生物群系与洞穴、方块光照传播、LOD、彩色光照、存档版本迁移
+
+## 许可证
+
+本项目采用 **MIT License**，见 [LICENSE](LICENSE)。
+
+`third_party/` 中的 Dear ImGui 与 FastNoiseLite 分别遵循其自带的 MIT 许可；
+SDL2、GLEW、GLM、miniaudio、spdlog、zlib 等系统库遵循各自的许可证。
