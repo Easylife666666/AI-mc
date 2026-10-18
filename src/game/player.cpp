@@ -105,7 +105,10 @@ void Player::update(const World& world, float yawDeg, const PlayerInput& input, 
     m_landEvent = false;
     m_stepEvent = false;
 
-    m_inWater = isWaterBlock(world, m_pos.x, m_pos.y + 0.9f, m_pos.z);
+    // Sample the block at the feet: chest-height sampling stops the buoyancy
+    // forces as soon as the chest breaks the surface, leaving the player stuck
+    // one block below the shore.
+    m_inWater = isWaterBlock(world, m_pos.x, m_pos.y + 0.1f, m_pos.z);
 
     if (m_flying) {
         const float speed = input.boost ? 24.0f : 12.0f;
@@ -114,7 +117,7 @@ void Player::update(const World& world, float yawDeg, const PlayerInput& input, 
     } else {
         float speed = input.sprint ? 5.9f : 4.3f;
         if (m_inWater) {
-            speed = 2.4f;
+            speed = 3.0f;
         }
         const glm::vec3 target(wish.x * speed, 0.0f, wish.z * speed);
         const float accel = m_inWater ? 5.0f : (wasOnGround ? 22.0f : 6.0f);
@@ -125,7 +128,11 @@ void Player::update(const World& world, float yawDeg, const PlayerInput& input, 
         if (m_inWater) {
             m_velocity.y -= 8.0f * dt;
             if (input.jump) {
-                m_velocity.y = 3.2f;
+                // In the top water layer allow a real jump so the player can
+                // clear a one-block shore; deeper down it is a gentle swim up.
+                const bool topLayer =
+                    !isWaterBlock(world, m_pos.x, m_pos.y + 1.0f, m_pos.z);
+                m_velocity.y = std::max(m_velocity.y, topLayer ? kJumpSpeed : 3.4f);
             }
             m_velocity.y *= (1.0f - 2.5f * dt);
         } else {

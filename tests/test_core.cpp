@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "core/math.h"
+#include "game/player.h"
 #include "game/raycast.h"
 #include "render/atlas.h"
 #include "render/chunk_mesh.h"
@@ -307,6 +308,60 @@ TEST(World, StreamingGenerationAndBlockEdits) {
     EXPECT_EQ(world.getBlock(0, surface, 0), BLOCK_AIR);
     EXPECT_FALSE(world.snapshotEdits().empty());
     EXPECT_FALSE(world.setBlock(10000, 0, 10000, BLOCK_STONE));
+}
+
+TEST(Player, CanClimbOutOfWater) {
+    Atlas atlas;
+    World world;
+    world.init(7);
+    world.setAtlas(&atlas);
+    world.update(glm::vec3(0.5f, 64.0f, 0.5f), 2, false);
+
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_EQ(world.getBlock(0, 0, 0), BLOCK_STONE);
+
+    // Controlled pool at y=46..47 (surface at 48); the shore top is one block
+    // above the water at y=49, which is exactly the case players got stuck on.
+    for (int z = -2; z <= 2; ++z) {
+        for (int x = -4; x <= 4; ++x) {
+            for (int y = 46; y <= 52; ++y) {
+                world.setBlock(x, y, z, BLOCK_AIR);
+            }
+            world.setBlock(x, 45, z, BLOCK_STONE);
+        }
+    }
+    for (int z = -2; z <= 2; ++z) {
+        for (int x = -4; x <= 0; ++x) {
+            for (int y = 46; y <= 47; ++y) {
+                world.setBlock(x, y, z, BLOCK_WATER);
+            }
+        }
+        for (int x = 1; x <= 4; ++x) {
+            for (int y = 46; y <= 48; ++y) {
+                world.setBlock(x, y, z, BLOCK_STONE);
+            }
+        }
+    }
+
+    Player player;
+    player.setPosition(glm::vec3(0.5f, 46.2f, 0.5f));
+
+    PlayerInput input;
+    input.forward = true;
+    input.jump = true;
+
+    bool climbed = false;
+    for (int step = 0; step < 1200; ++step) {
+        player.update(world, 0.0f, input, 1.0f / 120.0f);
+        if (player.position().y >= 48.9f && player.onGround()) {
+            climbed = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(climbed) << "player stuck at x=" << player.position().x
+                         << " y=" << player.position().y << " vy=" << player.velocity().y;
 }
 
 TEST(World, EmptyWorldQueriesAreSafe) {
