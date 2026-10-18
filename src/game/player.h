@@ -15,6 +15,7 @@ struct PlayerInput {
     bool up = false;
     bool down = false;
     bool sprint = false;
+    bool boost = false;
 };
 
 class Player {

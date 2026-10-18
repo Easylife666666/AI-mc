@@ -108,11 +108,11 @@ void Player::update(const World& world, float yawDeg, const PlayerInput& input, 
     m_inWater = isWaterBlock(world, m_pos.x, m_pos.y + 0.9f, m_pos.z);
 
     if (m_flying) {
-        const float speed = input.sprint ? 24.0f : 12.0f;
+        const float speed = input.boost ? 24.0f : 12.0f;
         m_velocity = wish * speed;
         m_velocity.y = (input.up ? speed : 0.0f) - (input.down ? speed : 0.0f);
     } else {
-        float speed = input.sprint ? 5.6f : 4.3f;
+        float speed = input.sprint ? 5.9f : 4.3f;
         if (m_inWater) {
             speed = 2.4f;
         }

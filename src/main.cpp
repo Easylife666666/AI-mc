@@ -143,7 +143,8 @@ void printUsage(const char* argv0) {
         "  --verbose          debug logging\n"
         "  --help             this text\n"
         "\n"
-        "controls: WASD move, Space jump, Shift sprint, F fly, Ctrl down (fly),\n"
+        "controls: WASD move, Space jump, double-tap W to sprint, F fly,\n"
+        "          Shift boosts flight, Ctrl down (fly),\n"
         "          LMB break, RMB place, 1-9/wheel select, F1 panel, F5 save,\n"
         "          F9 load, M mute, Esc quit\n",
         argv0);
@@ -397,6 +398,10 @@ int main(int argc, char** argv) {
     std::string status =
         loaded ? "loaded " + savePath : "new world, seed " + std::to_string(world.seed());
     bool mouseCaptured = false;
+    bool sprinting = false;
+    bool sprintActive = false;
+    Uint64 lastWTapMs = 0;
+    float smoothedFov = settings.fov;
     bool muted = false;
     bool appliedVsync = settings.vsync;
     bool running = true;
@@ -491,9 +496,22 @@ int main(int argc, char** argv) {
                     player.toggleFlying();
                 } else if (key == SDLK_m) {
                     muted = !muted;
+                } else if (key == SDLK_w) {
+                    const Uint64 nowMs = SDL_GetTicks64();
+                    if (nowMs - lastWTapMs <= 300) {
+                        sprinting = true;
+                    }
+                    lastWTapMs = nowMs;
                 } else if (key >= SDLK_1 && key <= SDLK_9) {
                     selected = key - SDLK_1;
                 }
+            }
+            if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_w) {
+                sprinting = false;
+            }
+            if (event.type == SDL_WINDOWEVENT &&
+                event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                sprinting = false;
             }
             if (event.type == SDL_MOUSEWHEEL && interactive && !ui.visible()) {
                 selected = (selected - event.wheel.y + static_cast<int>(hotbar.size())) %
@@ -515,8 +533,11 @@ int main(int argc, char** argv) {
             window.setRelativeMouse(wantCapture);
             mouseCaptured = wantCapture;
         }
+        if (!wantCapture) {
+            sprinting = false;
+        }
 
-        camera.fovDeg = settings.fov;
+        sprintActive = false;
 
         if (interactive && !ui.visible()) {
             aimc::PlayerInput input;
@@ -528,7 +549,9 @@ int main(int argc, char** argv) {
             input.jump = keys[SDL_SCANCODE_SPACE] != 0;
             input.up = keys[SDL_SCANCODE_SPACE] != 0;
             input.down = (keys[SDL_SCANCODE_LCTRL] != 0 || keys[SDL_SCANCODE_C] != 0);
-            input.sprint = keys[SDL_SCANCODE_LSHIFT] != 0;
+            input.sprint = sprinting && input.forward;
+            input.boost = keys[SDL_SCANCODE_LSHIFT] != 0;
+            sprintActive = input.sprint;
 
             int mouseX = 0;
             int mouseY = 0;
@@ -571,6 +594,10 @@ int main(int argc, char** argv) {
         } else {
             physicsAccumulator = 0.0;
         }
+
+        const float targetFov = settings.fov + (sprintActive ? 7.0f : 0.0f);
+        smoothedFov += (targetFov - smoothedFov) * std::min(1.0f, 12.0f * dt);
+        camera.fovDeg = smoothedFov;
 
         smoothedMs = smoothedMs * 0.95f + rawDt * 1000.0f * 0.05f;
         if (settings.adaptive && interactive && opt.benchmark <= 0.0f) {

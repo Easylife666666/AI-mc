@@ -124,7 +124,8 @@ UiActions DebugUI::draw(const Camera& camera, const World& world, const DrawStat
 
         ImGui::Separator();
         ImGui::TextWrapped("%s", status.c_str());
-        ImGui::TextDisabled("WASD move  Space jump  F fly");
+        ImGui::TextDisabled("WASD move  double-tap W sprint");
+        ImGui::TextDisabled("Space jump  F fly  Shift boosts flight");
         ImGui::TextDisabled("LMB break  RMB place  1-9 select");
         ImGui::TextDisabled("F1 close panel and capture mouse  Esc quit");
     }
