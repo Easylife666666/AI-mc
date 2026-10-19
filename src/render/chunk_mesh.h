@@ -25,6 +25,7 @@ struct MeshData {
 struct ChunkMeshData {
     MeshData opaque;
     MeshData water;
+    MeshData portal;  // emissive, so it keeps glowing at night
 };
 
 // Emits only visible faces with per-vertex ambient occlusion. Opaque geometry

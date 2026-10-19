@@ -49,6 +49,7 @@ public:
 
     DrawStats drawOpaque(const Frustum& frustum) const;
     DrawStats drawWater(const Frustum& frustum) const;
+    DrawStats drawPortal(const Frustum& frustum) const;
 
     BlockId getBlock(int worldX, int worldY, int worldZ) const;
     bool setBlock(int worldX, int worldY, int worldZ, BlockId id);

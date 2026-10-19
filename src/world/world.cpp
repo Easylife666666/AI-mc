@@ -226,6 +226,7 @@ void World::drainUploads(int budget) {
 
         uploadMesh(result.chunk->opaqueMesh, result.mesh.opaque);
         uploadMesh(result.chunk->waterMesh, result.mesh.water);
+        uploadMesh(result.chunk->portalMesh, result.mesh.portal);
         result.chunk->state.store(ChunkState::Ready, std::memory_order_release);
     }
 }
@@ -249,6 +250,7 @@ void World::unloadOutside(int centerX, int centerZ, int radius) {
     for (auto& chunk : removed) {
         freeGpu(chunk->opaqueMesh);
         freeGpu(chunk->waterMesh);
+        freeGpu(chunk->portalMesh);
         chunk->state.store(ChunkState::Empty, std::memory_order_release);
     }
 }
@@ -361,6 +363,27 @@ DrawStats World::drawWater(const Frustum& frustum) const {
         drawGpuMesh(chunk->waterMesh);
         ++stats.drawCalls;
         stats.triangles += chunk->waterMesh.indexCount / 3;
+    }
+    glBindVertexArray(0);
+    return stats;
+}
+
+DrawStats World::drawPortal(const Frustum& frustum) const {
+    DrawStats stats;
+    std::lock_guard<std::mutex> lock(m_mapMutex);
+    for (const auto& [key, chunk] : m_chunks) {
+        if (chunk->portalMesh.indexCount <= 0) {
+            continue;
+        }
+        const glm::vec3 origin = glm::vec3(chunk->origin());
+        const glm::vec3 min = origin;
+        const glm::vec3 max = origin + glm::vec3(Chunk::SX, Chunk::SY, Chunk::SZ);
+        if (!frustum.intersectsAabb(min, max)) {
+            continue;
+        }
+        drawGpuMesh(chunk->portalMesh);
+        ++stats.drawCalls;
+        stats.triangles += chunk->portalMesh.indexCount / 3;
     }
     glBindVertexArray(0);
     return stats;
@@ -519,6 +542,7 @@ void World::clearChunks() {
     for (auto& [key, chunk] : m_chunks) {
         freeGpu(chunk->opaqueMesh);
         freeGpu(chunk->waterMesh);
+        freeGpu(chunk->portalMesh);
     }
     m_chunks.clear();
 }

@@ -73,6 +73,7 @@ public:
 
     GpuMesh opaqueMesh;
     GpuMesh waterMesh;
+    GpuMesh portalMesh;
 
 private:
     glm::ivec2 m_coord;

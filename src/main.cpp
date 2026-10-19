@@ -30,6 +30,7 @@
 #include "ui/debug_ui.h"
 #include "world/block.h"
 #include "world/chunk.h"
+#include "world/portal.h"
 #include "world/save.h"
 #include "world/world.h"
 
@@ -141,7 +142,7 @@ void printUsage(const char* argv0) {
         "  --quit-after N     quit cleanly after N seconds (used for tests)\n"
         "  --panel            show the debug panel in screenshot mode\n"
         "  --inventory        open the creative inventory (screenshot/demo mode)\n"
-        "  --tab NAME         creative tab: building, natural or search\n"
+        "  --tab NAME         creative tab: building, natural, tools or search\n"
         "  --hidden           create a hidden window\n"
         "  --no-vsync         disable vsync\n"
         "  --no-hud           hide crosshair and hotbar\n"
@@ -151,7 +152,8 @@ void printUsage(const char* argv0) {
         "\n"
         "controls: WASD move, Space jump, double-tap W to sprint, F fly,\n"
         "          Shift boosts flight, Ctrl down (fly), E creative inventory,\n"
-        "          LMB break, RMB place, 1-9/wheel select, F1 panel, F5 save,\n"
+        "          RMB place, flint & steel lights obsidian frames,\n"
+        "          LMB break, 1-9/wheel select, F1 panel, F5 save,\n"
         "          F9 load, M mute, Esc quit\n",
         argv0);
 }
@@ -351,7 +353,7 @@ int main(int argc, char** argv) {
     aimc::Camera camera;
     aimc::Player player;
     aimc::CreativeScreen creative;
-    std::array<aimc::BlockId, aimc::kHotbarSlots> hotbar = aimc::defaultHotbar();
+    std::array<aimc::ItemRef, aimc::kHotbarSlots> hotbar = aimc::defaultHotbar();
     int selected = 0;
     float timeOfDay = opt.timeOfDay;
 
@@ -406,10 +408,12 @@ int main(int argc, char** argv) {
         creative.setTab(aimc::CreativeTab::Natural);
     } else if (opt.tab == "search") {
         creative.setTab(aimc::CreativeTab::Search);
+    } else if (opt.tab == "tools") {
+        creative.setTab(aimc::CreativeTab::Tools);
     } else if (opt.tab == "building") {
         creative.setTab(aimc::CreativeTab::Building);
     } else if (!opt.tab.empty()) {
-        spdlog::warn("unknown --tab '{}', expected building, natural or search", opt.tab);
+        spdlog::warn("unknown --tab '{}', expected building, natural, tools or search", opt.tab);
     }
 
     glEnable(GL_DEPTH_TEST);
@@ -687,7 +691,10 @@ int main(int argc, char** argv) {
 
         const auto blockGetter = [&world](int x, int y, int z) -> aimc::BlockId {
             const aimc::BlockId block = world.getBlock(x, y, z);
-            return block == aimc::BLOCK_WATER ? aimc::BLOCK_AIR : block;
+            const bool passThrough = block == aimc::BLOCK_WATER ||
+                                     block == aimc::BLOCK_PORTAL_X ||
+                                     block == aimc::BLOCK_PORTAL_Z;
+            return passThrough ? aimc::BLOCK_AIR : block;
         };
         const aimc::RayHit hit =
             aimc::raycastVoxel(blockGetter, camera.pos, camera.forward(), 6.0f);
@@ -698,7 +705,17 @@ int main(int argc, char** argv) {
                     audio.play(aimc::Audio::Sound::Break, 0.8f);
                 }
             }
-            if (clickPlace && hit.hit && hotbar[selected] != aimc::BLOCK_AIR) {
+            const aimc::ItemRef held = hotbar[selected];
+            if (clickPlace && hit.hit && held.isItem()) {
+                if (held.item == aimc::ItemId::FlintAndSteel) {
+                    if (aimc::lightPortal(world, hit.block + hit.normal)) {
+                        audio.play(aimc::Audio::Sound::Ignite, 0.7f);
+                        status = "portal lit";
+                    } else {
+                        status = "flint and steel: no obsidian frame";
+                    }
+                }
+            } else if (clickPlace && hit.hit && !held.empty()) {
                 const glm::ivec3 target = hit.block + hit.normal;
                 const aimc::BlockId existing = world.getBlock(target.x, target.y, target.z);
                 if (existing == aimc::BLOCK_AIR || existing == aimc::BLOCK_WATER) {
@@ -712,15 +729,15 @@ int main(int argc, char** argv) {
                         static_cast<float>(target.z) < pmax.z &&
                         static_cast<float>(target.z + 1) > pmin.z;
                     if (!overlaps) {
-                        if (world.setBlock(target.x, target.y, target.z, hotbar[selected])) {
+                        if (world.setBlock(target.x, target.y, target.z, held.block)) {
                             audio.play(aimc::Audio::Sound::Place, 0.7f);
                         }
                     }
                 }
             }
             if (clickPick && hit.hit) {
-                const aimc::BlockId picked =
-                    world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+                const aimc::ItemRef picked = aimc::ItemRef::ofBlock(
+                    world.getBlock(hit.block.x, hit.block.y, hit.block.z));
                 const auto it = std::find(hotbar.begin(), hotbar.end(), picked);
                 if (it != hotbar.end()) {
                     selected = static_cast<int>(it - hotbar.begin());
@@ -790,13 +807,18 @@ int main(int argc, char** argv) {
         glDisable(GL_CULL_FACE);
         shader.setFloat("uAlpha", 0.72f);
         const aimc::DrawStats waterStats = world.drawWater(frustum);
+        // Portals are emissive: draw them with a fixed light so they glow at night.
+        shader.setFloat("uAlpha", 0.80f);
+        shader.setFloat("uLight", 1.0f);
+        const aimc::DrawStats portalStats = world.drawPortal(frustum);
+        shader.setFloat("uLight", lightScale);
         shader.setFloat("uAlpha", 1.0f);
         glEnable(GL_CULL_FACE);
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
 
-        stats.drawCalls += waterStats.drawCalls;
-        stats.triangles += waterStats.triangles;
+        stats.drawCalls += waterStats.drawCalls + portalStats.drawCalls;
+        stats.triangles += waterStats.triangles + portalStats.triangles;
 
         if (settings.hud && hit.hit) {
             selection.draw(viewProj, hit.block);

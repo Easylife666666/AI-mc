@@ -128,14 +128,15 @@ UiActions DebugUI::draw(const Camera& camera, const World& world, const DrawStat
         ImGui::TextDisabled("Space jump  F fly  Shift boosts flight");
         ImGui::TextDisabled("E creative inventory");
         ImGui::TextDisabled("LMB break  RMB place  1-9 select");
+        ImGui::TextDisabled("RMB with flint & steel: light an obsidian frame");
         ImGui::TextDisabled("F1 close panel and capture mouse  Esc quit");
     }
     ImGui::End();
     return actions;
 }
 
-void DebugUI::drawHud(const RayHit& hit, const BlockId* hotbarBlocks, int hotbarCount,
-                      int selected, const Atlas& atlas, bool flying) {
+void DebugUI::drawHud(const RayHit& hit, const ItemRef* hotbar, int hotbarCount, int selected,
+                      const Atlas& atlas, bool flying) {
     if (!m_initialized) {
         return;
     }
@@ -175,9 +176,9 @@ void DebugUI::drawHud(const RayHit& hit, const BlockId* hotbarBlocks, int hotbar
         draw->AddRect(p0, p1, chosen ? IM_COL32(255, 255, 255, 255) : IM_COL32(90, 90, 90, 210),
                       5.0f, 0, chosen ? 2.0f : 1.0f);
 
-        const BlockId block = hotbarBlocks[i];
-        if (block != BLOCK_AIR) {
-            const glm::vec4 uv = atlas.tileUV(blockDef(block).tileSide);
+        const ItemRef item = hotbar[i];
+        if (!item.empty()) {
+            const glm::vec4 uv = atlas.tileUV(item.iconTile());
             // OpenGL v=0 is the bottom of the atlas; ImGui's (0,0) is the top.
             draw->AddImage(texture, ImVec2(p0.x + 6.0f, p0.y + 6.0f),
                            ImVec2(p1.x - 6.0f, p1.y - 6.0f), ImVec2(uv.x, uv.w),
@@ -188,8 +189,8 @@ void DebugUI::drawHud(const RayHit& hit, const BlockId* hotbarBlocks, int hotbar
         draw->AddText(ImVec2(p0.x + 4.0f, p0.y + 2.0f), IM_COL32(255, 255, 255, 190), label);
     }
 
-    if (selected >= 0 && selected < hotbarCount && hotbarBlocks[selected] != BLOCK_AIR) {
-        const char* name = blockDef(hotbarBlocks[selected]).name;
+    if (selected >= 0 && selected < hotbarCount && !hotbar[selected].empty()) {
+        const char* name = hotbar[selected].name();
         const ImVec2 size = ImGui::CalcTextSize(name);
         draw->AddText(ImVec2((display.x - size.x) * 0.5f, y0 - 22.0f),
                       IM_COL32(255, 255, 255, 235), name);

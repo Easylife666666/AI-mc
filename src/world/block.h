@@ -19,6 +19,9 @@ enum BlockId : std::uint8_t {
     BLOCK_STONE_BRICKS,
     BLOCK_BRICKS,
     BLOCK_SNOW,
+    BLOCK_OBSIDIAN,
+    BLOCK_PORTAL_X,   // portal plane normal along X (spans Y/Z)
+    BLOCK_PORTAL_Z,   // portal plane normal along Z (spans X/Y)
     BLOCK_COUNT
 };
 

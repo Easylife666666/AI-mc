@@ -4,11 +4,11 @@
 
 namespace aimc {
 
-// Procedurally generated 4x4 tile atlas. Each 16 px tile gets a 2 px replicated
+// Procedurally generated 8x8 tile atlas. Each 16 px tile gets a 2 px replicated
 // border so mipmaps do not bleed neighbouring tiles. No asset files needed.
 class Atlas {
 public:
-    static constexpr int Grid = 4;
+    static constexpr int Grid = 8;
     static constexpr int TileSize = 16;
     static constexpr int Padding = 2;
     static constexpr int Pitch = TileSize + Padding * 2;

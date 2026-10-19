@@ -14,6 +14,7 @@ public:
         Place,
         Jump,
         Land,
+        Ignite,
         Count,
     };
 

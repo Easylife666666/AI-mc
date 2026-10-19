@@ -18,13 +18,13 @@ struct SaveData {
     float pitch = -18.0f;
     int selected = 0;
     float timeOfDay = 0.42f;
-    std::array<BlockId, kHotbarSlots> hotbar = defaultHotbar();
+    std::array<ItemRef, kHotbarSlots> hotbar = defaultHotbar();
     std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> edits;
 };
 
 // zlib-compressed binary save. Only player edits are stored; terrain is
-// regenerated deterministically from the seed. Version 1 files (no hotbar) are
-// still accepted.
+// regenerated deterministically from the seed. Version 1 (no hotbar) and
+// version 2 (blocks only, no items) files are still accepted.
 bool saveWorld(const std::string& path, const SaveData& data);
 bool loadWorld(const std::string& path, SaveData& data);
 

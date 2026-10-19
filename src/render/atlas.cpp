@@ -151,9 +151,62 @@ glm::vec3 tileColor(int tile, int x, int y) {
         }
         return c;
     }
+    case 16: {  // flint and steel inventory icon (alpha comes from tileAlpha)
+        // y grows upwards, so the flint sits low-left and the striker runs up-right.
+        const bool flint = x >= 3 && x <= 8 && y >= 2 && y <= 6 &&
+                           !(x == 3 && y == 2) && !(x == 8 && y == 2) &&
+                           !(x == 3 && y == 6) && !(x == 8 && y == 6);
+        const bool bar = x >= 8 && x <= 13 && (y - x) >= -2 && (y - x) <= 1;
+        const bool hook = x >= 6 && x <= 8 && y >= 4 && y <= 6;
+        const bool spark = (x == 12 && y == 12) || (x == 13 && y == 12) || (x == 12 && y == 13);
+        if (spark) {
+            return glm::vec3(1.0f, 0.76f, 0.20f);
+        }
+        if (flint) {
+            return mixv({0.16f, 0.14f, 0.17f}, {0.38f, 0.34f, 0.37f},
+                        valueNoise(u * 9.0f, v * 9.0f, 201));
+        }
+        if (bar || hook) {
+            const float n = valueNoise(u * 10.0f, v * 10.0f, 202);
+            return mixv({0.58f, 0.60f, 0.64f}, {0.92f, 0.94f, 0.98f}, n);
+        }
+        return glm::vec3(0.0f);
+    }
+    case 17: {  // obsidian: near-black with sparse purple glints
+        glm::vec3 c = mixv({0.05f, 0.04f, 0.08f}, {0.15f, 0.11f, 0.21f},
+                           valueNoise(u * 6.0f, v * 6.0f, 181));
+        if (hash01(x, y, 182) < 0.03f) {
+            c = mixv(c, {0.26f, 0.16f, 0.38f}, 0.7f);
+        }
+        return c;
+    }
+    case 18: {  // nether portal swirl
+        const float swirl = std::sin((static_cast<float>(x) * 0.9f +
+                                      static_cast<float>(y) * 0.55f) * 0.9f +
+                                     valueNoise(u * 3.0f, v * 3.0f, 191) * 5.0f);
+        glm::vec3 c = mixv({0.20f, 0.02f, 0.40f}, {0.66f, 0.22f, 1.0f},
+                           0.5f + 0.5f * swirl);
+        if (valueNoise(u * 4.0f, v * 4.0f, 192) < 0.26f) {
+            c *= 0.62f;
+        }
+        return c;
+    }
     default:
         return glm::vec3(1.0f, 0.0f, 1.0f);  // debug magenta
     }
+}
+
+float tileAlpha(int tile, int x, int y) {
+    if (tile != 16) {
+        return 1.0f;
+    }
+    const bool flint = x >= 3 && x <= 8 && y >= 2 && y <= 6 &&
+                       !(x == 3 && y == 2) && !(x == 8 && y == 2) &&
+                       !(x == 3 && y == 6) && !(x == 8 && y == 6);
+    const bool bar = x >= 8 && x <= 13 && (y - x) >= -2 && (y - x) <= 1;
+    const bool hook = x >= 6 && x <= 8 && y >= 4 && y <= 6;
+    const bool spark = (x == 12 && y == 12) || (x == 13 && y == 12) || (x == 12 && y == 13);
+    return (flint || bar || hook || spark) ? 1.0f : 0.0f;
 }
 
 }  // namespace
@@ -185,7 +238,8 @@ bool Atlas::build() {
                 pixels[o + 0] = static_cast<std::uint8_t>(c.x * 255.0f + 0.5f);
                 pixels[o + 1] = static_cast<std::uint8_t>(c.y * 255.0f + 0.5f);
                 pixels[o + 2] = static_cast<std::uint8_t>(c.z * 255.0f + 0.5f);
-                pixels[o + 3] = 255;
+                pixels[o + 3] =
+                    static_cast<std::uint8_t>(tileAlpha(tile, cx, cy) * 255.0f + 0.5f);
             }
         }
     }

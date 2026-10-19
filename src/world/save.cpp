@@ -11,7 +11,7 @@ namespace aimc {
 namespace {
 
 constexpr char kMagic[4] = {'A', 'I', 'M', 'C'};
-constexpr std::uint32_t kVersion = 2;      // 2 adds the hotbar
+constexpr std::uint32_t kVersion = 3;      // 3 adds items to hotbar slots
 constexpr std::uint32_t kMinVersion = 1;
 constexpr std::uint32_t kMaxChunks = 1u << 20;
 constexpr std::uint32_t kMaxEdits = 1u << 16;
@@ -48,9 +48,11 @@ bool saveWorld(const std::string& path, const SaveData& data) {
     ok = ok && writePod(file, data.pitch);
     ok = ok && writePod(file, data.selected);
     ok = ok && writePod(file, data.timeOfDay);
-    for (const BlockId block : data.hotbar) {
-        const auto value = static_cast<std::uint8_t>(block);
-        ok = ok && writePod(file, value);
+    for (const ItemRef& slot : data.hotbar) {
+        const auto block = static_cast<std::uint8_t>(slot.block);
+        const auto item = static_cast<std::uint8_t>(slot.item);
+        ok = ok && writePod(file, block);
+        ok = ok && writePod(file, item);
     }
 
     const auto chunkCount = static_cast<std::uint32_t>(data.edits.size());
@@ -115,13 +117,29 @@ bool loadWorld(const std::string& path, SaveData& data) {
     ok = ok && readPod(file, loaded.pitch);
     ok = ok && readPod(file, loaded.selected);
     ok = ok && readPod(file, loaded.timeOfDay);
-    if (version >= 2) {
-        for (std::size_t i = 0; i < loaded.hotbar.size(); ++i) {
+    if (version >= 3) {
+        for (ItemRef& slot : loaded.hotbar) {
+            std::uint8_t block = 0;
+            std::uint8_t item = 0;
+            ok = ok && readPod(file, block);
+            ok = ok && readPod(file, item);
+            slot.block = block < static_cast<std::uint8_t>(BLOCK_COUNT)
+                             ? static_cast<BlockId>(block)
+                             : BLOCK_AIR;
+            slot.item = item < static_cast<std::uint8_t>(ItemId::Count)
+                            ? static_cast<ItemId>(item)
+                            : ItemId::None;
+            if (slot.item != ItemId::None) {
+                slot.block = BLOCK_AIR;
+            }
+        }
+    } else if (version >= 2) {
+        for (ItemRef& slot : loaded.hotbar) {
             std::uint8_t block = 0;
             ok = ok && readPod(file, block);
-            loaded.hotbar[i] =
-                block < static_cast<std::uint8_t>(BLOCK_COUNT) ? static_cast<BlockId>(block)
-                                                               : BLOCK_AIR;
+            slot = block < static_cast<std::uint8_t>(BLOCK_COUNT)
+                       ? ItemRef::ofBlock(static_cast<BlockId>(block))
+                       : ItemRef{};
         }
     }
 

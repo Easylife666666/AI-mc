@@ -21,6 +21,9 @@ const BlockDef kDefs[BLOCK_COUNT] = {
     {"Stone Bricks",    12,  12,   12,  true,  true},
     {"Bricks",          13,  13,   13,  true,  true},
     {"Snow Block",      14,  14,   14,  true,  true},
+    {"Obsidian",        17,  17,   17,  true,  true},
+    {"Nether Portal",   18,  18,   18,  false, false},
+    {"Nether Portal",   18,  18,   18,  false, false},
 };
 
 }  // namespace

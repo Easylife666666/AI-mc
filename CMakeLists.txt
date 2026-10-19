@@ -40,6 +40,7 @@ target_compile_features(imgui PUBLIC cxx_std_17)
 add_library(aimc_core STATIC
   src/audio/audio.cpp
   src/game/creative.cpp
+  src/game/item.cpp
   src/game/player.cpp
   src/game/settings.cpp
   src/game/raycast.cpp
@@ -55,6 +56,7 @@ add_library(aimc_core STATIC
   src/world/block.cpp
   src/world/chunk.cpp
   src/world/save.cpp
+  src/world/portal.cpp
   src/world/terrain.cpp
   src/world/world.cpp
   src/ui/creative_screen.cpp

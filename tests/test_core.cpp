@@ -2,8 +2,11 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <set>
+#include <string>
 #include <thread>
+#include <tuple>
 
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
@@ -14,6 +17,7 @@
 
 #include "core/math.h"
 #include "game/creative.h"
+#include "game/item.h"
 #include "game/player.h"
 #include "game/raycast.h"
 #include "render/atlas.h"
@@ -23,6 +27,7 @@
 #include "world/chunk.h"
 #include "world/terrain.h"
 #include "world/save.h"
+#include "world/portal.h"
 #include "world/world.h"
 #include "game/settings.h"
 
@@ -250,8 +255,8 @@ TEST(Save, RoundtripPreservesData) {
     data.pitch = -12.0f;
     data.selected = 6;
     data.timeOfDay = 0.625f;
-    data.hotbar[0] = BLOCK_SNOW;
-    data.hotbar[4] = BLOCK_BRICKS;
+    data.hotbar[0] = ItemRef::ofBlock(BLOCK_SNOW);
+    data.hotbar[4] = ItemRef::ofItem(ItemId::FlintAndSteel);
     data.edits[0x0000000100000002ull][123] = static_cast<std::uint8_t>(BLOCK_STONE);
 
     ASSERT_TRUE(saveWorld("aimc_test_save.aimc", data));
@@ -420,33 +425,48 @@ TEST(World, EmptyWorldQueriesAreSafe) {
     EXPECT_FALSE(world.chunkReady(0, 0));
 }
 
-TEST(Creative, TabsContainOnlyPlaceableBlocks) {
-    const std::vector<BlockId>& all = creativeAllBlocks();
+TEST(Creative, TabsContainRealItems) {
+    const std::vector<ItemRef>& all = creativeAllItems();
     EXPECT_FALSE(all.empty());
-    for (const BlockId block : all) {
-        EXPECT_NE(block, BLOCK_AIR);
-        EXPECT_LT(block, BLOCK_COUNT);
-        EXPECT_TRUE(blockMatchesQuery(block, ""));
+    for (const ItemRef& item : all) {
+        EXPECT_FALSE(item.empty());
+        EXPECT_TRUE(itemMatchesQuery(item, ""));
     }
 
-    const std::vector<BlockId>& building = creativeTabItems(CreativeTab::Building);
-    EXPECT_NE(std::find(building.begin(), building.end(), BLOCK_STONE), building.end());
-    EXPECT_NE(std::find(building.begin(), building.end(), BLOCK_STONE_BRICKS),
+    const std::vector<ItemRef>& building = creativeTabItems(CreativeTab::Building);
+    EXPECT_NE(std::find(building.begin(), building.end(), ItemRef::ofBlock(BLOCK_STONE)),
+              building.end());
+    EXPECT_NE(std::find(building.begin(), building.end(),
+                        ItemRef::ofBlock(BLOCK_STONE_BRICKS)),
               building.end());
 
-    const std::vector<BlockId>& natural = creativeTabItems(CreativeTab::Natural);
-    EXPECT_NE(std::find(natural.begin(), natural.end(), BLOCK_GRASS), natural.end());
-    EXPECT_NE(std::find(natural.begin(), natural.end(), BLOCK_WATER), natural.end());
+    const std::vector<ItemRef>& natural = creativeTabItems(CreativeTab::Natural);
+    EXPECT_NE(std::find(natural.begin(), natural.end(), ItemRef::ofBlock(BLOCK_GRASS)),
+              natural.end());
+    EXPECT_NE(std::find(natural.begin(), natural.end(), ItemRef::ofBlock(BLOCK_WATER)),
+              natural.end());
+
+    const std::vector<ItemRef>& tools = creativeTabItems(CreativeTab::Tools);
+    EXPECT_NE(std::find(tools.begin(), tools.end(), ItemRef::ofItem(ItemId::FlintAndSteel)),
+              tools.end());
 }
 
 TEST(Creative, SearchMatchesNamesCaseInsensitively) {
-    const std::vector<BlockId> hits = creativeItems(CreativeTab::Search, "STONE");
-    EXPECT_NE(std::find(hits.begin(), hits.end(), BLOCK_STONE), hits.end());
-    EXPECT_NE(std::find(hits.begin(), hits.end(), BLOCK_STONE_BRICKS), hits.end());
-    EXPECT_EQ(std::find(hits.begin(), hits.end(), BLOCK_WATER), hits.end());
+    const std::vector<ItemRef> hits = creativeItems(CreativeTab::Search, "STONE");
+    EXPECT_NE(std::find(hits.begin(), hits.end(), ItemRef::ofBlock(BLOCK_STONE)), hits.end());
+    EXPECT_NE(std::find(hits.begin(), hits.end(), ItemRef::ofBlock(BLOCK_STONE_BRICKS)),
+              hits.end());
+    EXPECT_EQ(std::find(hits.begin(), hits.end(), ItemRef::ofBlock(BLOCK_WATER)), hits.end());
 
-    EXPECT_EQ(creativeItems(CreativeTab::Search, "").size(), creativeAllBlocks().size());
+    EXPECT_EQ(creativeItems(CreativeTab::Search, "").size(), creativeAllItems().size());
     EXPECT_TRUE(creativeItems(CreativeTab::Search, "zzz").empty());
+}
+
+TEST(Creative, SearchFindsItems) {
+    const std::vector<ItemRef> hits = creativeItems(CreativeTab::Search, "flint");
+    ASSERT_EQ(hits.size(), 1u);
+    EXPECT_TRUE(hits[0].isItem());
+    EXPECT_EQ(hits[0].item, ItemId::FlintAndSteel);
 }
 
 TEST(Creative, ScrollRowsClampToContent) {
@@ -459,19 +479,36 @@ TEST(Creative, ScrollRowsClampToContent) {
 }
 
 TEST(Creative, HotbarFillsFirstEmptySlot) {
-    std::array<BlockId, kHotbarSlots> bar = defaultHotbar();
+    std::array<ItemRef, kHotbarSlots> bar = defaultHotbar();
     EXPECT_EQ(bar.size(), static_cast<std::size_t>(kHotbarSlots));
     EXPECT_EQ(firstEmptyHotbarSlot(bar), -1);
-    EXPECT_EQ(putInHotbar(bar, BLOCK_SNOW), -1);
+    EXPECT_EQ(putInHotbar(bar, ItemRef::ofBlock(BLOCK_SNOW)), -1);
 
-    bar[3] = BLOCK_AIR;
+    bar[3] = {};
     EXPECT_EQ(firstEmptyHotbarSlot(bar), 3);
-    EXPECT_EQ(putInHotbar(bar, BLOCK_STONE_BRICKS), 3);
-    EXPECT_EQ(bar[3], BLOCK_STONE_BRICKS);
+    EXPECT_EQ(putInHotbar(bar, ItemRef::ofBlock(BLOCK_STONE_BRICKS)), 3);
+    EXPECT_EQ(bar[3], ItemRef::ofBlock(BLOCK_STONE_BRICKS));
 
-    bar[0] = BLOCK_AIR;
-    EXPECT_EQ(putInHotbar(bar, BLOCK_BRICKS), 0);
-    EXPECT_EQ(bar[0], BLOCK_BRICKS);
+    bar[0] = {};
+    EXPECT_EQ(putInHotbar(bar, ItemRef::ofItem(ItemId::FlintAndSteel)), 0);
+    EXPECT_EQ(bar[0], ItemRef::ofItem(ItemId::FlintAndSteel));
+}
+
+TEST(Item, RefsDistinguishBlocksAndItems) {
+    const ItemRef flint = ItemRef::ofItem(ItemId::FlintAndSteel);
+    EXPECT_TRUE(flint.isItem());
+    EXPECT_FALSE(flint.empty());
+    EXPECT_EQ(std::string(flint.name()), "Flint and Steel");
+    EXPECT_EQ(flint.iconTile(), 16);
+    EXPECT_EQ(maxStackSize(flint), 1);
+
+    const ItemRef stone = ItemRef::ofBlock(BLOCK_STONE);
+    EXPECT_FALSE(stone.isItem());
+    EXPECT_EQ(std::string(stone.name()), "Stone");
+    EXPECT_EQ(maxStackSize(stone), kMaxBlockStack);
+
+    EXPECT_TRUE(ItemRef{}.empty());
+    EXPECT_EQ(maxStackSize(ItemRef::ofBlock(BLOCK_STONE)), 64);
 }
 
 TEST(Save, LoadsVersion1WithoutHotbar) {
@@ -524,51 +561,86 @@ TEST(Save, RejectsNewerVersion) {
 
 TEST(Creative, CursorStacksFollowVanillaRules) {
     ItemStack cursor;
-    takeItem(cursor, BLOCK_STONE);
-    EXPECT_EQ(cursor.block, BLOCK_STONE);
+    takeItem(cursor, ItemRef::ofBlock(BLOCK_STONE));
+    EXPECT_EQ(cursor.ref.block, BLOCK_STONE);
     EXPECT_EQ(cursor.count, 1);
 
-    takeItem(cursor, BLOCK_STONE);
+    takeItem(cursor, ItemRef::ofBlock(BLOCK_STONE));
     EXPECT_EQ(cursor.count, 2);
     for (int i = 0; i < 200; ++i) {
-        takeItem(cursor, BLOCK_STONE);
+        takeItem(cursor, ItemRef::ofBlock(BLOCK_STONE));
     }
-    EXPECT_EQ(cursor.count, kMaxStack);
+    EXPECT_EQ(cursor.count, kMaxBlockStack);
 
-    takeItem(cursor, BLOCK_DIRT);
-    EXPECT_EQ(cursor.block, BLOCK_DIRT);
+    takeItem(cursor, ItemRef::ofBlock(BLOCK_DIRT));
+    EXPECT_EQ(cursor.ref.block, BLOCK_DIRT);
     EXPECT_EQ(cursor.count, 1);
 
-    takeOneItem(cursor, BLOCK_DIRT);
+    takeOneItem(cursor, ItemRef::ofBlock(BLOCK_DIRT));
     EXPECT_TRUE(cursor.empty());
-    takeOneItem(cursor, BLOCK_SAND);
-    EXPECT_EQ(cursor.block, BLOCK_SAND);
+    takeOneItem(cursor, ItemRef::ofBlock(BLOCK_SAND));
+    EXPECT_EQ(cursor.ref.block, BLOCK_SAND);
     EXPECT_EQ(cursor.count, 1);
 }
 
-TEST(Creative, HotbarClicksPlaceAndPickUp) {
-    std::array<BlockId, kHotbarSlots> bar = defaultHotbar();
+TEST(Creative, CursorRespectsItemStackLimits) {
     ItemStack cursor;
-    takeItem(cursor, BLOCK_SNOW);
+    const ItemRef flint = ItemRef::ofItem(ItemId::FlintAndSteel);
+    takeItem(cursor, flint);
+    EXPECT_EQ(cursor.count, 1);
+    for (int i = 0; i < 10; ++i) {
+        takeItem(cursor, flint);
+    }
+    EXPECT_EQ(cursor.count, 1);  // tools do not stack
+
+    const std::array<ItemRef, kHotbarSlots> bar = defaultHotbar();
+    ItemStack toolCursor;
+    toolCursor.ref = flint;
+    toolCursor.count = static_cast<std::uint8_t>(maxStackSize(flint));
+    EXPECT_EQ(toolCursor.count, 1);
+    EXPECT_EQ(bar[0].block, BLOCK_GRASS);
+}
+
+TEST(Creative, HotbarClicksPlaceAndPickUp) {
+    std::array<ItemRef, kHotbarSlots> bar = defaultHotbar();
+    ItemStack cursor;
+    takeItem(cursor, ItemRef::ofBlock(BLOCK_SNOW));
 
     clickHotbarSlot(bar, cursor, 2);  // occupied: swap the held stack with the slot
-    EXPECT_EQ(bar[2], BLOCK_SNOW);
-    EXPECT_EQ(cursor.block, BLOCK_STONE);
-    EXPECT_EQ(cursor.count, kMaxStack);
+    EXPECT_EQ(bar[2], ItemRef::ofBlock(BLOCK_SNOW));
+    EXPECT_EQ(cursor.ref.block, BLOCK_STONE);
+    EXPECT_EQ(cursor.count, kMaxBlockStack);
 
     clickHotbarSlot(bar, cursor, 4);
-    EXPECT_EQ(bar[4], BLOCK_STONE);
-    EXPECT_EQ(cursor.block, BLOCK_LOG);
+    EXPECT_EQ(bar[4], ItemRef::ofBlock(BLOCK_STONE));
+    EXPECT_EQ(cursor.ref.block, BLOCK_LOG);
 
     cursor.clear();
     clickHotbarSlot(bar, cursor, 0);  // empty cursor: pick the slot up
-    EXPECT_EQ(cursor.block, BLOCK_GRASS);
-    EXPECT_EQ(bar[0], BLOCK_AIR);
-    EXPECT_EQ(cursor.count, kMaxStack);
+    EXPECT_EQ(cursor.ref.block, BLOCK_GRASS);
+    EXPECT_TRUE(bar[0].empty());
+    EXPECT_EQ(cursor.count, kMaxBlockStack);
 
     clickHotbarSlot(bar, cursor, 0);  // put it back
     EXPECT_TRUE(cursor.empty());
-    EXPECT_EQ(bar[0], BLOCK_GRASS);
+    EXPECT_EQ(bar[0].block, BLOCK_GRASS);
+}
+
+TEST(Creative, HotbarAcceptsItems) {
+    std::array<ItemRef, kHotbarSlots> bar = defaultHotbar();
+    bar[5] = {};  // empty slot: the item is dropped in and the cursor clears
+    ItemStack cursor;
+    takeItem(cursor, ItemRef::ofItem(ItemId::FlintAndSteel));
+    clickHotbarSlot(bar, cursor, 5);
+    EXPECT_TRUE(bar[5].isItem());
+    EXPECT_EQ(bar[5].item, ItemId::FlintAndSteel);
+    EXPECT_TRUE(cursor.empty());
+
+    // Swapping into an occupied slot puts the old block back on the cursor.
+    takeItem(cursor, ItemRef::ofItem(ItemId::FlintAndSteel));
+    clickHotbarSlot(bar, cursor, 0);
+    EXPECT_EQ(bar[0], ItemRef::ofItem(ItemId::FlintAndSteel));
+    EXPECT_EQ(cursor.ref, ItemRef::ofBlock(BLOCK_GRASS));
 }
 
 TEST(Block, AirTextureIsReserved) {
@@ -583,6 +655,221 @@ TEST(Block, AirTextureIsReserved) {
         EXPECT_NE(def.tileBottom, airTile) << def.name;
         EXPECT_NE(def.tileSide, airTile) << def.name;
     }
+}
+
+TEST(Portal, LightsMinimalFrame) {
+    std::map<std::tuple<int, int, int>, BlockId> blocks;
+    const auto get = [&blocks](int x, int y, int z) {
+        const auto it = blocks.find({x, y, z});
+        return it == blocks.end() ? BLOCK_AIR : it->second;
+    };
+    const auto set = [&blocks](int x, int y, int z, BlockId id) {
+        blocks[{x, y, z}] = id;
+        return true;
+    };
+
+    // 4x5 obsidian frame at z=0 with a 2x3 interior.
+    for (int x = 0; x <= 3; ++x) {
+        set(x, 0, 0, BLOCK_OBSIDIAN);
+        set(x, 4, 0, BLOCK_OBSIDIAN);
+    }
+    for (int y = 0; y <= 4; ++y) {
+        set(0, y, 0, BLOCK_OBSIDIAN);
+        set(3, y, 0, BLOCK_OBSIDIAN);
+    }
+
+    PortalFrame frame;
+    ASSERT_TRUE(findPortalFrame(get, glm::ivec3(1, 1, 0), frame));
+    EXPECT_TRUE(frame.normalZ);
+    EXPECT_EQ(frame.width(), 2);
+    EXPECT_EQ(frame.height(), 3);
+
+    ASSERT_TRUE(fillPortal(get, set, glm::ivec3(1, 1, 0), frame));
+    EXPECT_EQ(get(1, 1, 0), BLOCK_PORTAL_Z);
+    EXPECT_EQ(get(2, 2, 0), BLOCK_PORTAL_Z);
+    EXPECT_EQ(get(2, 3, 0), BLOCK_PORTAL_Z);
+    EXPECT_EQ(get(0, 0, 0), BLOCK_OBSIDIAN);
+    EXPECT_EQ(get(-1, 1, 0), BLOCK_AIR);
+}
+
+TEST(Portal, RejectsBrokenRing) {
+    std::map<std::tuple<int, int, int>, BlockId> blocks;
+    const auto get = [&blocks](int x, int y, int z) {
+        const auto it = blocks.find({x, y, z});
+        return it == blocks.end() ? BLOCK_AIR : it->second;
+    };
+    const auto set = [&blocks](int x, int y, int z, BlockId id) {
+        blocks[{x, y, z}] = id;
+        return true;
+    };
+
+    for (int x = 0; x <= 3; ++x) {
+        set(x, 0, 0, BLOCK_OBSIDIAN);
+        set(x, 4, 0, BLOCK_OBSIDIAN);
+    }
+    for (int y = 0; y <= 4; ++y) {
+        set(0, y, 0, BLOCK_OBSIDIAN);
+        set(3, y, 0, BLOCK_OBSIDIAN);
+    }
+    set(3, 4, 0, BLOCK_AIR);  // missing corner
+
+    PortalFrame frame;
+    EXPECT_FALSE(findPortalFrame(get, glm::ivec3(1, 1, 0), frame));
+}
+
+TEST(Portal, RejectsTooNarrowInterior) {
+    std::map<std::tuple<int, int, int>, BlockId> blocks;
+    const auto get = [&blocks](int x, int y, int z) {
+        const auto it = blocks.find({x, y, z});
+        return it == blocks.end() ? BLOCK_AIR : it->second;
+    };
+    const auto set = [&blocks](int x, int y, int z, BlockId id) {
+        blocks[{x, y, z}] = id;
+        return true;
+    };
+
+    // 3x5 frame: interior is only one block wide.
+    for (int x = 0; x <= 2; ++x) {
+        set(x, 0, 0, BLOCK_OBSIDIAN);
+        set(x, 4, 0, BLOCK_OBSIDIAN);
+    }
+    for (int y = 0; y <= 4; ++y) {
+        set(0, y, 0, BLOCK_OBSIDIAN);
+        set(2, y, 0, BLOCK_OBSIDIAN);
+    }
+
+    PortalFrame frame;
+    EXPECT_FALSE(findPortalFrame(get, glm::ivec3(1, 1, 0), frame));
+}
+
+TEST(Portal, RejectsTooWideInterior) {
+    std::map<std::tuple<int, int, int>, BlockId> blocks;
+    const auto get = [&blocks](int x, int y, int z) {
+        const auto it = blocks.find({x, y, z});
+        return it == blocks.end() ? BLOCK_AIR : it->second;
+    };
+    const auto set = [&blocks](int x, int y, int z, BlockId id) {
+        blocks[{x, y, z}] = id;
+        return true;
+    };
+
+    // 22 blocks of interior space: beyond the vanilla 21 limit.
+    for (int x = 0; x <= 23; ++x) {
+        set(x, 0, 0, BLOCK_OBSIDIAN);
+        set(x, 4, 0, BLOCK_OBSIDIAN);
+    }
+    for (int y = 0; y <= 4; ++y) {
+        set(0, y, 0, BLOCK_OBSIDIAN);
+        set(23, y, 0, BLOCK_OBSIDIAN);
+    }
+
+    PortalFrame frame;
+    EXPECT_FALSE(findPortalFrame(get, glm::ivec3(1, 1, 0), frame));
+}
+
+TEST(Portal, RejectsSolidStart) {
+    std::map<std::tuple<int, int, int>, BlockId> blocks;
+    blocks[{1, 1, 0}] = BLOCK_STONE;
+    const auto get = [&blocks](int x, int y, int z) {
+        const auto it = blocks.find({x, y, z});
+        return it == blocks.end() ? BLOCK_AIR : it->second;
+    };
+    PortalFrame frame;
+    EXPECT_FALSE(findPortalFrame(get, glm::ivec3(1, 1, 0), frame));
+}
+
+TEST(Save, LoadsVersion2WithoutItems) {
+    const char* path = "aimc_test_save_v2.aimc";
+    gzFile file = gzopen(path, "wb6");
+    ASSERT_NE(file, nullptr);
+
+    const char magic[4] = {'A', 'I', 'M', 'C'};
+    const std::uint32_t version = 2;
+    const std::int32_t seed = 555;
+    const float pose[5] = {1.0f, 2.0f, 3.0f, 45.0f, -10.0f};
+    const std::int32_t selected = 1;
+    const float time = 0.25f;
+    const std::uint8_t hotbar[9] = {3, 0, 2, 0, 0, 0, 0, 0, 9};
+    const std::uint32_t chunks = 0;
+    ASSERT_EQ(gzwrite(file, magic, 4), 4);
+    ASSERT_EQ(gzwrite(file, &version, 4), 4);
+    ASSERT_EQ(gzwrite(file, &seed, 4), 4);
+    ASSERT_EQ(gzwrite(file, pose, static_cast<unsigned int>(sizeof(pose))),
+              static_cast<int>(sizeof(pose)));
+    ASSERT_EQ(gzwrite(file, &selected, 4), 4);
+    ASSERT_EQ(gzwrite(file, &time, 4), 4);
+    ASSERT_EQ(gzwrite(file, hotbar, sizeof(hotbar)), static_cast<int>(sizeof(hotbar)));
+    ASSERT_EQ(gzwrite(file, &chunks, 4), 4);
+    ASSERT_EQ(gzclose(file), Z_OK);
+
+    SaveData loaded;
+    ASSERT_TRUE(loadWorld(path, loaded));
+    std::remove(path);
+
+    EXPECT_EQ(loaded.seed, 555);
+    EXPECT_EQ(loaded.hotbar[0], ItemRef::ofBlock(BLOCK_STONE));
+    EXPECT_TRUE(loaded.hotbar[1].empty());
+    EXPECT_EQ(loaded.hotbar[2], ItemRef::ofBlock(BLOCK_DIRT));
+    EXPECT_EQ(loaded.hotbar[8], ItemRef::ofBlock(BLOCK_WATER));
+    for (const ItemRef& slot : loaded.hotbar) {
+        EXPECT_FALSE(slot.isItem());
+    }
+}
+
+TEST(Mesh, PortalBecomesASinglePlane) {
+    Atlas atlas;
+    Chunk chunk(glm::ivec2(0, 0));
+    World world;
+    chunk.set(4, 4, 4, static_cast<std::uint8_t>(BLOCK_PORTAL_Z));
+
+    ChunkMeshData mesh;
+    buildChunkMesh(chunk, world, atlas, mesh);
+
+    EXPECT_TRUE(mesh.opaque.vertices.empty());
+    EXPECT_TRUE(mesh.water.vertices.empty());
+    ASSERT_EQ(mesh.portal.vertices.size(), 4u);
+    ASSERT_EQ(mesh.portal.indices.size(), 6u);
+    for (const Vertex& v : mesh.portal.vertices) {
+        EXPECT_FLOAT_EQ(v.pos[2], 4.5f);
+        EXPECT_FLOAT_EQ(v.light, 1.0f);
+    }
+}
+
+TEST(Portal, LightsInARealWorld) {
+    Atlas atlas;
+    World world;
+    world.init(7);
+    world.setAtlas(&atlas);
+    world.update(glm::vec3(0.5f, 64.0f, 0.5f), 1, false);
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_NE(world.getBlock(0, 0, 0), BLOCK_AIR);
+
+    const int surface = world.surfaceY(0, 0);
+    ASSERT_GE(surface, 0);
+    const int y0 = std::min(surface + 2, Chunk::SY - 6);
+    const int z = 0;
+
+    // Bottom and top rows, then the side columns: no block is set twice.
+    for (int x = 0; x <= 3; ++x) {
+        ASSERT_TRUE(world.setBlock(x, y0, z, BLOCK_OBSIDIAN));
+        ASSERT_TRUE(world.setBlock(x, y0 + 4, z, BLOCK_OBSIDIAN));
+    }
+    for (int y = y0 + 1; y <= y0 + 3; ++y) {
+        ASSERT_TRUE(world.setBlock(0, y, z, BLOCK_OBSIDIAN));
+        ASSERT_TRUE(world.setBlock(3, y, z, BLOCK_OBSIDIAN));
+    }
+    for (int x = 1; x <= 2; ++x) {
+        for (int y = y0 + 1; y <= y0 + 3; ++y) {
+            (void)world.setBlock(x, y, z, BLOCK_AIR);
+        }
+    }
+
+    EXPECT_TRUE(lightPortal(world, glm::ivec3(1, y0 + 1, z)));
+    EXPECT_EQ(world.getBlock(1, y0 + 1, z), BLOCK_PORTAL_Z);
+    EXPECT_EQ(world.getBlock(2, y0 + 3, z), BLOCK_PORTAL_Z);
+    EXPECT_EQ(world.getBlock(0, y0, z), BLOCK_OBSIDIAN);
 }
 
 }  // namespace

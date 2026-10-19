@@ -86,6 +86,27 @@ void drawBlockIcon(ImDrawList* dl, const ImTextureRef& tex, const Atlas& atlas, 
                      IM_COL32(255, 255, 255, 255));
 }
 
+// Items use a flat 16x16 sprite; blocks use the isometric cube above.
+void drawItemIcon(ImDrawList* dl, const ImTextureRef& tex, const Atlas& atlas,
+                  const ImVec2& center, float halfSize, int tile) {
+    const glm::vec4 uv = atlas.tileUV(tile);
+    dl->AddImage(tex, ImVec2(center.x - halfSize, center.y - halfSize),
+                 ImVec2(center.x + halfSize, center.y + halfSize), ImVec2(uv.x, uv.w),
+                 ImVec2(uv.z, uv.y));
+}
+
+void drawRefIcon(ImDrawList* dl, const ImTextureRef& tex, const Atlas& atlas, const ItemRef& item,
+                 const ImVec2& center, float halfSize) {
+    if (item.empty()) {
+        return;
+    }
+    if (item.isItem()) {
+        drawItemIcon(dl, tex, atlas, center, halfSize, item.iconTile());
+    } else {
+        drawBlockIcon(dl, tex, atlas, item.block, center, halfSize);
+    }
+}
+
 }  // namespace
 
 void CreativeScreen::setOpen(bool open) {
@@ -99,7 +120,7 @@ void CreativeScreen::setTab(CreativeTab tab) {
     m_scrollRow = 0;
 }
 
-bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>& hotbar,
+bool CreativeScreen::draw(const Atlas& atlas, std::array<ItemRef, kHotbarSlots>& hotbar,
                           int& selected, bool acceptInput) {
     if (!m_open) {
         return false;
@@ -151,7 +172,7 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
     bevel(dl, ImVec2(panelX, panelY), ImVec2(panelX + panelW, panelY + panelH), kPanelBg,
           kPanelLight, kPanelDark, panelBevel);
 
-    const std::vector<BlockId> items = creativeItems(m_tab, std::string(m_query));
+    const std::vector<ItemRef> items = creativeItems(m_tab, std::string(m_query));
     const CreativeTabInfo current = creativeTabInfo(m_tab);
     const int maxScroll = creativeMaxScrollRow(static_cast<int>(items.size()), Columns, Rows);
     m_scrollRow = std::clamp(m_scrollRow, 0, maxScroll);
@@ -198,8 +219,9 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
             dl->AddLine(ImVec2(c.x + r * 0.72f, c.y + r * 0.72f),
                         ImVec2(c.x + r * 1.7f, c.y + r * 1.7f), kTextDark, 2.0f);
         } else {
-            drawBlockIcon(dl, tex, atlas, info.icon,
-                          ImVec2(x + tabW * 0.5f, tabY + tabH * 0.5f + 1.0f), slotSize * 0.27f);
+            drawRefIcon(dl, tex, atlas, info.icon,
+                        ImVec2(x + tabW * 0.5f, tabY + tabH * 0.5f + 1.0f),
+                        slotSize * (info.icon.isItem() ? 0.38f : 0.27f));
         }
 
         if (hovered) {
@@ -245,9 +267,10 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
             if (index < 0 || index >= static_cast<int>(items.size())) {
                 continue;
             }
-            const BlockId block = items[static_cast<std::size_t>(index)];
-            drawBlockIcon(dl, tex, atlas, block,
-                          ImVec2((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f), slotSize * 0.33f);
+            const ItemRef item = items[static_cast<std::size_t>(index)];
+            drawRefIcon(dl, tex, atlas, item,
+                        ImVec2((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f),
+                        slotSize * (item.isItem() ? 0.37f : 0.33f));
 
             char id[32];
             std::snprintf(id, sizeof(id), "##creative_item%d", index);
@@ -260,12 +283,12 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
                 dl->AddRect(ImVec2(p0.x + 1.0f, p0.y + 1.0f), ImVec2(p1.x - 1.0f, p1.y - 1.0f),
                             kHoverOutline, 0.0f, 0, 1.5f);
                 if (m_cursor.empty()) {
-                    ImGui::SetTooltip("%s", blockDef(block).name);
+                    ImGui::SetTooltip("%s", item.name());
                 }
                 if (acceptInput && !m_textFocus) {
                     for (int k = 0; k < kHotbarSlots; ++k) {
                         if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_1 + k))) {
-                            hotbar[static_cast<std::size_t>(k)] = block;
+                            hotbar[static_cast<std::size_t>(k)] = item;
                             selected = k;
                             break;
                         }
@@ -276,14 +299,14 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
             const bool left = acceptInput && ImGui::IsItemClicked(ImGuiMouseButton_Left);
             const bool right = acceptInput && ImGui::IsItemClicked(ImGuiMouseButton_Right);
             if (left && io.KeyShift) {
-                const int placed = putInHotbar(hotbar, block);
+                const int placed = putInHotbar(hotbar, item);
                 if (placed >= 0) {
                     selected = placed;
                 }
             } else if (left) {
-                takeItem(m_cursor, block);
+                takeItem(m_cursor, item);
             } else if (right) {
-                takeOneItem(m_cursor, block);
+                takeOneItem(m_cursor, item);
             }
         }
     }
@@ -294,10 +317,11 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
         const ImVec2 p1(p0.x + slotSize, p0.y + slotSize);
         drawSlot(dl, p0, p1, slotBevel);
 
-        const BlockId block = hotbar[static_cast<std::size_t>(i)];
-        if (block != BLOCK_AIR) {
-            drawBlockIcon(dl, tex, atlas, block,
-                          ImVec2((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f), slotSize * 0.33f);
+        const ItemRef item = hotbar[static_cast<std::size_t>(i)];
+        if (!item.empty()) {
+            drawRefIcon(dl, tex, atlas, item,
+                        ImVec2((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f),
+                        slotSize * (item.isItem() ? 0.37f : 0.33f));
         }
         const char label[2] = {static_cast<char>('1' + i), '\0'};
         dl->AddText(ImVec2(p0.x + 2.0f, p0.y + 1.0f), kNumberLabel, label);
@@ -313,8 +337,8 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
             dl->AddRect(ImVec2(p0.x - 2.0f, p0.y - 2.0f), ImVec2(p1.x + 2.0f, p1.y + 2.0f),
                         kSelectedOutline, 0.0f, 0, 2.0f);
         }
-        if (hovered && block != BLOCK_AIR && m_cursor.empty()) {
-            ImGui::SetTooltip("%s", blockDef(block).name);
+        if (hovered && !item.empty() && m_cursor.empty()) {
+            ImGui::SetTooltip("%s", item.name());
         }
 
         const bool clicked = acceptInput && (ImGui::IsItemClicked(ImGuiMouseButton_Left) ||
@@ -400,7 +424,7 @@ bool CreativeScreen::draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>&
     if (!m_cursor.empty()) {
         ImDrawList* fg = ImGui::GetForegroundDrawList();
         const ImVec2 mouse = io.MousePos;
-        drawBlockIcon(fg, tex, atlas, m_cursor.block, mouse, slotSize * 0.38f);
+        drawRefIcon(fg, tex, atlas, m_cursor.ref, mouse, slotSize * 0.38f);
         if (m_cursor.count > 1) {
             char count[8];
             std::snprintf(count, sizeof(count), "%d", static_cast<int>(m_cursor.count));

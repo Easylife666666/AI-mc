@@ -33,7 +33,7 @@ public:
 
     // Draws the screen. Mutates the hotbar (blocks dropped there) and selected
     // (the slot the player places from). Returns true while open.
-    bool draw(const Atlas& atlas, std::array<BlockId, kHotbarSlots>& hotbar, int& selected,
+    bool draw(const Atlas& atlas, std::array<ItemRef, kHotbarSlots>& hotbar, int& selected,
               bool acceptInput);
 
 private:

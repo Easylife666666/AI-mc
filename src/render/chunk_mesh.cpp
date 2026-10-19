@@ -54,6 +54,53 @@ inline BlockId blockAt(const Chunk& chunk, const World& world, int x, int y, int
 
 inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
+// Portals are a single translucent plane in the middle of their block, not a
+// full cube. The transparent pass disables culling, so one quad is enough.
+void emitPortalQuad(const Chunk& chunk, MeshData& mesh, int x, int y, int z, bool normalZ,
+                    const glm::vec4& uvRect) {
+    const glm::ivec3 origin = chunk.origin();
+    const float baseX = static_cast<float>(origin.x + x);
+    const float baseY = static_cast<float>(origin.y + y);
+    const float baseZ = static_cast<float>(origin.z + z);
+    const float planeX = baseX + 0.5f;
+    const float planeZ = baseZ + 0.5f;
+
+    struct Corner {
+        float x, y, z, u, v;
+    };
+    std::array<Corner, 4> corners{};
+    if (normalZ) {
+        corners = {{{baseX, baseY, planeZ, 0.0f, 0.0f},
+                    {baseX + 1.0f, baseY, planeZ, 1.0f, 0.0f},
+                    {baseX + 1.0f, baseY + 1.0f, planeZ, 1.0f, 1.0f},
+                    {baseX, baseY + 1.0f, planeZ, 0.0f, 1.0f}}};
+    } else {
+        corners = {{{planeX, baseY, baseZ, 0.0f, 0.0f},
+                    {planeX, baseY, baseZ + 1.0f, 1.0f, 0.0f},
+                    {planeX, baseY + 1.0f, baseZ + 1.0f, 1.0f, 1.0f},
+                    {planeX, baseY + 1.0f, baseZ, 0.0f, 1.0f}}};
+    }
+
+    const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
+    for (const Corner& c : corners) {
+        Vertex v{};
+        v.pos[0] = c.x;
+        v.pos[1] = c.y;
+        v.pos[2] = c.z;
+        v.uv[0] = lerp(uvRect.x, uvRect.z, c.u);
+        v.uv[1] = lerp(uvRect.y, uvRect.w, c.v);
+        v.light = 1.0f;
+        mesh.vertices.push_back(v);
+    }
+    mesh.indices.push_back(base + 0);
+    mesh.indices.push_back(base + 1);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 0);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 3);
+}
+
+
 // Classic voxel AO: two edge neighbours and the diagonal corner of the face.
 float vertexAo(const Chunk& chunk, const World& world, int x, int y, int z, const FaceDef& face,
                int cornerIndex) {
@@ -124,6 +171,8 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
     out.opaque.indices.clear();
     out.water.vertices.clear();
     out.water.indices.clear();
+    out.portal.vertices.clear();
+    out.portal.indices.clear();
 
     auto lock = chunk.readLock();
 
@@ -135,6 +184,11 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
                     continue;
                 }
                 const BlockDef& def = blockDef(block);
+                if (block == BLOCK_PORTAL_X || block == BLOCK_PORTAL_Z) {
+                    emitPortalQuad(chunk, out.portal, x, y, z, block == BLOCK_PORTAL_Z,
+                                   atlas.tileUV(def.tileSide));
+                    continue;
+                }
                 const bool water = block == BLOCK_WATER;
 
                 for (const FaceDef& face : kFaces) {

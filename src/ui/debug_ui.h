@@ -3,6 +3,7 @@
 #include <SDL.h>
 #include <string>
 
+#include "game/item.h"
 #include "game/settings.h"
 #include "world/block.h"
 
@@ -37,7 +38,7 @@ public:
     void beginFrame();
     UiActions draw(const Camera& camera, const World& world, const DrawStats& stats, float dt,
                    Settings& settings, float& timeOfDay, const std::string& status);
-    void drawHud(const RayHit& hit, const BlockId* hotbarBlocks, int hotbarCount, int selected,
+    void drawHud(const RayHit& hit, const ItemRef* hotbar, int hotbarCount, int selected,
                  const Atlas& atlas, bool flying);
     void endFrame();
 
