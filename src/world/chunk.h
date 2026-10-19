@@ -73,6 +73,7 @@ public:
 
     GpuMesh opaqueMesh;
     GpuMesh waterMesh;
+    GpuMesh lavaMesh;
     GpuMesh portalMesh;
 
 private:

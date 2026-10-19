@@ -171,6 +171,8 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
     out.opaque.indices.clear();
     out.water.vertices.clear();
     out.water.indices.clear();
+    out.lava.vertices.clear();
+    out.lava.indices.clear();
     out.portal.vertices.clear();
     out.portal.indices.clear();
 
@@ -190,6 +192,7 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
                     continue;
                 }
                 const bool water = block == BLOCK_WATER;
+                const bool lava = block == BLOCK_LAVA;
 
                 for (const FaceDef& face : kFaces) {
                     const BlockId neighbour =
@@ -205,9 +208,11 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
                                                         : def.tileSide;
                     const glm::vec4 uvRect = atlas.tileUV(tile);
 
-                    if (water) {
+                    if (water || lava) {
                         const float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-                        emitFace(chunk, out.water, x, y, z, face, uvRect, face.light * 0.9f, ao);
+                        MeshData& target = lava ? out.lava : out.water;
+                        const float light = lava ? 1.0f : face.light * 0.9f;
+                        emitFace(chunk, target, x, y, z, face, uvRect, light, ao);
                     } else {
                         float ao[4];
                         for (int c = 0; c < 4; ++c) {

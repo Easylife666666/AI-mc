@@ -67,6 +67,19 @@ constexpr float kPi = 3.14159265358979323846f;
 
 }  // namespace
 
+SkyState computeNetherSky(float timeOfDay) {
+    (void)timeOfDay;
+    SkyState state;
+    state.sunDir = glm::vec3(0.0f, -1.0f, 0.0f);
+    state.zenith = glm::vec3(0.10f, 0.03f, 0.03f);
+    state.horizon = glm::vec3(0.18f, 0.05f, 0.04f);
+    state.fogColor = glm::vec3(0.24f, 0.07f, 0.04f);
+    state.sunColor = glm::vec3(0.85f, 0.30f, 0.10f);
+    state.light = 0.55f;
+    state.dayFactor = 1.0f;
+    return state;
+}
+
 SkyState computeSky(float timeOfDay) {
     SkyState state;
     const float t = timeOfDay - std::floor(timeOfDay);

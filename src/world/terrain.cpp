@@ -165,4 +165,71 @@ void Terrain::generate(Chunk& chunk) const {
     }
 }
 
+NetherTerrain::NetherTerrain(int seed) : m_seed(seed) {
+    m_height.SetSeed(seed ^ 0x1F123BB5);
+    m_height.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    m_height.SetFractalType(FastNoiseLite::FractalType_FBm);
+    m_height.SetFractalOctaves(3);
+    m_height.SetFractalLacunarity(2.0f);
+    m_height.SetFractalGain(0.5f);
+    m_height.SetFrequency(0.02f);
+
+    m_soil.SetSeed(seed ^ 0x2545F491);
+    m_soil.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    m_soil.SetFrequency(0.05f);
+}
+
+int NetherTerrain::heightAt(int worldX, int worldZ) const {
+    const float n = m_height.GetNoise(static_cast<float>(worldX), static_cast<float>(worldZ));
+    const int h = 26 + static_cast<int>(std::lround(n * 22.0f));
+    return std::clamp(h, LavaLevel - 4, Chunk::SY - 14);
+}
+
+void NetherTerrain::generate(Chunk& chunk) const {
+    const glm::ivec3 origin = chunk.origin();
+
+    for (int z = 0; z < Chunk::SZ; ++z) {
+        for (int x = 0; x < Chunk::SX; ++x) {
+            const int worldX = origin.x + x;
+            const int worldZ = origin.z + z;
+            const int height = heightAt(worldX, worldZ);
+            const float soil = m_soil.GetNoise(static_cast<float>(worldX),
+                                               static_cast<float>(worldZ));
+            for (int y = 0; y < Chunk::SY; ++y) {
+                BlockId block = BLOCK_AIR;
+                if (y == 0 || y == Chunk::SY - 1) {
+                    block = BLOCK_BEDROCK;
+                } else if (y <= height) {
+                    block = (y == height && soil > 0.42f) ? BLOCK_SOUL_SAND : BLOCK_NETHERRACK;
+                } else if (y <= LavaLevel) {
+                    block = BLOCK_LAVA;
+                }
+                chunk.set(x, y, z, static_cast<std::uint8_t>(block));
+            }
+        }
+    }
+
+    // Glowstone clusters hanging from the bedrock roof.
+    const int cx = chunk.coord().x;
+    const int cz = chunk.coord().y;
+    Rng rng(hash2(static_cast<std::uint32_t>(cx), static_cast<std::uint32_t>(cz),
+                  static_cast<std::uint32_t>(m_seed) ^ 0x6A09E667u));
+    const int clusters = 1 + (rng.unit() < 0.55f ? 1 : 0);
+    for (int i = 0; i < clusters; ++i) {
+        const int lx = 2 + static_cast<int>(rng.unit() * 12.0f);
+        const int lz = 2 + static_cast<int>(rng.unit() * 12.0f);
+        const int count = 2 + static_cast<int>(rng.unit() * 4.0f);
+        for (int k = 0; k < count; ++k) {
+            const int gx = lx + static_cast<int>(rng.unit() * 3.0f) - 1;
+            const int gz = lz + static_cast<int>(rng.unit() * 3.0f) - 1;
+            if (gx < 0 || gx >= Chunk::SX || gz < 0 || gz >= Chunk::SZ) {
+                continue;
+            }
+            if (chunk.get(gx, Chunk::SY - 2, gz) == static_cast<std::uint8_t>(BLOCK_AIR)) {
+                chunk.set(gx, Chunk::SY - 2, gz,
+                          static_cast<std::uint8_t>(BLOCK_GLOWSTONE));
+            }
+        }
+    }
+}
 }  // namespace aimc

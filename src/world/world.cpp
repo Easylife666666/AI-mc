@@ -31,6 +31,16 @@ Terrain& threadTerrain(int seed) {
     return *terrain;
 }
 
+NetherTerrain& threadNether(int seed) {
+    static thread_local std::unique_ptr<NetherTerrain> terrain;
+    static thread_local int cachedSeed = -1;
+    if (!terrain || cachedSeed != seed) {
+        terrain = std::make_unique<NetherTerrain>(seed);
+        cachedSeed = seed;
+    }
+    return *terrain;
+}
+
 struct PendingGuard {
     std::atomic<int>& counter;
     ~PendingGuard() { counter.fetch_sub(1); }
@@ -128,10 +138,13 @@ void World::ensureChunk(int cx, int cz) {
 
 void World::runGenerate(std::shared_ptr<Chunk> chunk) {
     PendingGuard guard(m_pending);
-    Terrain& terrain = threadTerrain(m_seed);
     {
         auto lock = chunk->writeLock();
-        terrain.generate(*chunk);
+        if (m_dimension == Dimension::Nether) {
+            threadNether(m_seed).generate(*chunk);
+        } else {
+            threadTerrain(m_seed).generate(*chunk);
+        }
         applyEditsLocked(*chunk);
     }
     chunk->state.store(ChunkState::Generated, std::memory_order_release);
@@ -226,6 +239,7 @@ void World::drainUploads(int budget) {
 
         uploadMesh(result.chunk->opaqueMesh, result.mesh.opaque);
         uploadMesh(result.chunk->waterMesh, result.mesh.water);
+        uploadMesh(result.chunk->lavaMesh, result.mesh.lava);
         uploadMesh(result.chunk->portalMesh, result.mesh.portal);
         result.chunk->state.store(ChunkState::Ready, std::memory_order_release);
     }
@@ -250,6 +264,7 @@ void World::unloadOutside(int centerX, int centerZ, int radius) {
     for (auto& chunk : removed) {
         freeGpu(chunk->opaqueMesh);
         freeGpu(chunk->waterMesh);
+        freeGpu(chunk->lavaMesh);
         freeGpu(chunk->portalMesh);
         chunk->state.store(ChunkState::Empty, std::memory_order_release);
     }
@@ -363,6 +378,27 @@ DrawStats World::drawWater(const Frustum& frustum) const {
         drawGpuMesh(chunk->waterMesh);
         ++stats.drawCalls;
         stats.triangles += chunk->waterMesh.indexCount / 3;
+    }
+    glBindVertexArray(0);
+    return stats;
+}
+
+DrawStats World::drawLava(const Frustum& frustum) const {
+    DrawStats stats;
+    std::lock_guard<std::mutex> lock(m_mapMutex);
+    for (const auto& [key, chunk] : m_chunks) {
+        if (chunk->lavaMesh.indexCount <= 0) {
+            continue;
+        }
+        const glm::vec3 origin = glm::vec3(chunk->origin());
+        const glm::vec3 min = origin;
+        const glm::vec3 max = origin + glm::vec3(Chunk::SX, Chunk::SY, Chunk::SZ);
+        if (!frustum.intersectsAabb(min, max)) {
+            continue;
+        }
+        drawGpuMesh(chunk->lavaMesh);
+        ++stats.drawCalls;
+        stats.triangles += chunk->lavaMesh.indexCount / 3;
     }
     glBindVertexArray(0);
     return stats;
@@ -526,8 +562,48 @@ void World::restoreEdits(std::map<std::uint64_t, std::map<std::uint32_t, std::ui
 void World::reset(int seed) {
     clearChunks();
     m_seed = seed;
+    m_dimension = Dimension::Overworld;
     std::lock_guard<std::mutex> lock(m_editsMutex);
     m_edits.clear();
+    for (auto& edits : m_storedEdits) {
+        edits.clear();
+    }
+}
+
+void World::setDimension(Dimension dim) {
+    if (dim == m_dimension) {
+        return;
+    }
+    clearChunks();
+    {
+        std::lock_guard<std::mutex> lock(m_editsMutex);
+        const std::size_t from = static_cast<std::size_t>(m_dimension);
+        const std::size_t to = static_cast<std::size_t>(dim);
+        m_storedEdits[from] = std::move(m_edits);
+        m_edits = std::move(m_storedEdits[to]);
+        m_storedEdits[to].clear();
+    }
+    m_dimension = dim;
+    spdlog::info("switched to dimension {}", dimensionName(dim));
+}
+
+std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> World::editsFor(
+    Dimension dim) const {
+    std::lock_guard<std::mutex> lock(m_editsMutex);
+    if (dim == m_dimension) {
+        return m_edits;
+    }
+    return m_storedEdits[static_cast<std::size_t>(dim)];
+}
+
+void World::setDimensionEdits(
+    Dimension dim, std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> edits) {
+    std::lock_guard<std::mutex> lock(m_editsMutex);
+    if (dim == m_dimension) {
+        m_edits = std::move(edits);
+    } else {
+        m_storedEdits[static_cast<std::size_t>(dim)] = std::move(edits);
+    }
 }
 
 void World::clearChunks() {
@@ -542,6 +618,7 @@ void World::clearChunks() {
     for (auto& [key, chunk] : m_chunks) {
         freeGpu(chunk->opaqueMesh);
         freeGpu(chunk->waterMesh);
+        freeGpu(chunk->lavaMesh);
         freeGpu(chunk->portalMesh);
     }
     m_chunks.clear();

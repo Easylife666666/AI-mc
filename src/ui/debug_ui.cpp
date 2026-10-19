@@ -90,6 +90,7 @@ UiActions DebugUI::draw(const Camera& camera, const World& world, const DrawStat
         ImGui::Text("camera  %.1f  %.1f  %.1f", camera.pos.x, camera.pos.y, camera.pos.z);
         ImGui::Text("chunks  %d / %d visible", stats.visibleChunks, stats.totalChunks);
         ImGui::Text("draw calls %d   triangles %lld", stats.drawCalls, stats.triangles);
+        ImGui::Text("dimension %s", dimensionName(world.dimension()));
         ImGui::Text("seed %d   time %.3f", world.seed(), timeOfDay);
         ImGui::Separator();
 

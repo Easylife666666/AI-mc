@@ -15,6 +15,7 @@ const std::vector<ItemRef> kBuilding = {
     ItemRef::ofBlock(BLOCK_BRICKS),
     ItemRef::ofBlock(BLOCK_PLANKS),
     ItemRef::ofBlock(BLOCK_OBSIDIAN),
+    ItemRef::ofBlock(BLOCK_NETHER_BRICKS),
 };
 
 const std::vector<ItemRef> kNatural = {
@@ -26,6 +27,15 @@ const std::vector<ItemRef> kNatural = {
     ItemRef::ofBlock(BLOCK_LEAVES),
     ItemRef::ofBlock(BLOCK_SNOW),
     ItemRef::ofBlock(BLOCK_WATER),
+};
+
+const std::vector<ItemRef> kNether = {
+    ItemRef::ofBlock(BLOCK_NETHERRACK),
+    ItemRef::ofBlock(BLOCK_SOUL_SAND),
+    ItemRef::ofBlock(BLOCK_GLOWSTONE),
+    ItemRef::ofBlock(BLOCK_BEDROCK),
+    ItemRef::ofBlock(BLOCK_LAVA),
+    ItemRef::ofBlock(BLOCK_NETHER_BRICKS),
 };
 
 const std::vector<ItemRef> kTools = {
@@ -40,6 +50,9 @@ const std::vector<ItemRef> kAll = {
     ItemRef::ofBlock(BLOCK_GRAVEL),       ItemRef::ofBlock(BLOCK_LOG),
     ItemRef::ofBlock(BLOCK_LEAVES),       ItemRef::ofBlock(BLOCK_SNOW),
     ItemRef::ofBlock(BLOCK_WATER),        ItemRef::ofBlock(BLOCK_OBSIDIAN),
+    ItemRef::ofBlock(BLOCK_NETHERRACK),   ItemRef::ofBlock(BLOCK_SOUL_SAND),
+    ItemRef::ofBlock(BLOCK_GLOWSTONE),    ItemRef::ofBlock(BLOCK_BEDROCK),
+    ItemRef::ofBlock(BLOCK_LAVA),         ItemRef::ofBlock(BLOCK_NETHER_BRICKS),
     ItemRef::ofItem(ItemId::FlintAndSteel),
 };
 
@@ -56,6 +69,8 @@ const std::vector<ItemRef>& itemsForTab(CreativeTab tab) {
         return kBuilding;
     case CreativeTab::Natural:
         return kNatural;
+    case CreativeTab::Nether:
+        return kNether;
     case CreativeTab::Tools:
         return kTools;
     case CreativeTab::Search:
@@ -73,6 +88,8 @@ CreativeTabInfo creativeTabInfo(CreativeTab tab) {
         return {"Building Blocks", ItemRef::ofBlock(BLOCK_STONE), false};
     case CreativeTab::Natural:
         return {"Natural Blocks", ItemRef::ofBlock(BLOCK_GRASS), false};
+    case CreativeTab::Nether:
+        return {"Nether Blocks", ItemRef::ofBlock(BLOCK_NETHERRACK), false};
     case CreativeTab::Tools:
         return {"Tools & Utilities", ItemRef::ofItem(ItemId::FlintAndSteel), false};
     case CreativeTab::Search:

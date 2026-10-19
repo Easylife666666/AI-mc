@@ -165,6 +165,79 @@ bool fillPortal(const BlockGetter& get, const BlockSetter& set, const glm::ivec3
     return true;
 }
 
+bool findPortalNear(const World& world, const glm::ivec3& target, int radius,
+                    glm::ivec3& out) {
+    for (int dx = -radius; dx <= radius; ++dx) {
+        for (int dz = -radius; dz <= radius; ++dz) {
+            const int x = target.x + dx;
+            const int z = target.z + dz;
+            for (int y = 1; y < Chunk::SY - 1; ++y) {
+                if (isPortalBlock(world.getBlock(x, y, z))) {
+                    out = glm::ivec3(x, y, z);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+bool buildPortalAt(World& world, const glm::ivec3& target, glm::vec3& spawn) {
+    int base = -1;
+    for (int y = Chunk::SY - 8; y >= 2; --y) {
+        const BlockId ground = world.getBlock(target.x, y, target.z);
+        if (!isSolid(ground) || isLiquid(ground)) {
+            continue;
+        }
+        bool clear = true;
+        for (int yy = y + 1; yy <= y + 5; ++yy) {
+            if (isSolid(world.getBlock(target.x, yy, target.z))) {
+                clear = false;
+                break;
+            }
+        }
+        if (clear) {
+            base = y;
+            break;
+        }
+    }
+    if (base < 2 || base + 5 >= Chunk::SY - 1) {
+        return false;
+    }
+
+    // Recess the bottom row into the ground so the player can walk straight in,
+    // and carve the air above it so the portal is not buried in a hill.
+    for (int x = target.x - 1; x <= target.x + 2; ++x) {
+        for (int z = target.z - 1; z <= target.z + 1; ++z) {
+            for (int y = base + 1; y <= base + 5; ++y) {
+                (void)world.setBlock(x, y, z, BLOCK_AIR);
+            }
+        }
+    }
+
+    for (int x = target.x - 1; x <= target.x + 2; ++x) {
+        (void)world.setBlock(x, base, target.z, BLOCK_OBSIDIAN);
+        (void)world.setBlock(x, base + 4, target.z, BLOCK_OBSIDIAN);
+    }
+    for (int y = base + 1; y <= base + 3; ++y) {
+        (void)world.setBlock(target.x - 1, y, target.z, BLOCK_OBSIDIAN);
+        (void)world.setBlock(target.x + 2, y, target.z, BLOCK_OBSIDIAN);
+    }
+    for (int x = target.x; x <= target.x + 1; ++x) {
+        for (int y = base + 1; y <= base + 3; ++y) {
+            (void)world.setBlock(x, y, target.z, BLOCK_AIR);
+        }
+    }
+
+    if (!lightPortal(world, glm::ivec3(target.x, base + 1, target.z))) {
+        return false;
+    }
+    spawn = glm::vec3(static_cast<float>(target.x) + 0.5f,
+                      static_cast<float>(base + 1) + 0.01f,
+                      static_cast<float>(target.z) + 0.5f);
+    return true;
+}
+
 bool lightPortal(World& world, const glm::ivec3& start) {
     PortalFrame frame;
     const BlockGetter get = [&world](int x, int y, int z) { return world.getBlock(x, y, z); };

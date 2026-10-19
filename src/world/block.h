@@ -22,6 +22,12 @@ enum BlockId : std::uint8_t {
     BLOCK_OBSIDIAN,
     BLOCK_PORTAL_X,   // portal plane normal along X (spans Y/Z)
     BLOCK_PORTAL_Z,   // portal plane normal along Z (spans X/Y)
+    BLOCK_NETHERRACK,
+    BLOCK_SOUL_SAND,
+    BLOCK_GLOWSTONE,
+    BLOCK_BEDROCK,
+    BLOCK_LAVA,
+    BLOCK_NETHER_BRICKS,
     BLOCK_COUNT
 };
 
@@ -38,5 +44,6 @@ struct BlockDef {
 const BlockDef& blockDef(BlockId id);
 bool isOpaque(BlockId id);
 bool isSolid(BlockId id);
+bool isLiquid(BlockId id);
 
 }  // namespace aimc

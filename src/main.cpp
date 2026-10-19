@@ -142,7 +142,7 @@ void printUsage(const char* argv0) {
         "  --quit-after N     quit cleanly after N seconds (used for tests)\n"
         "  --panel            show the debug panel in screenshot mode\n"
         "  --inventory        open the creative inventory (screenshot/demo mode)\n"
-        "  --tab NAME         creative tab: building, natural, tools or search\n"
+        "  --tab NAME         creative tab: building, natural, nether, tools or search\n"
         "  --hidden           create a hidden window\n"
         "  --no-vsync         disable vsync\n"
         "  --no-hud           hide crosshair and hotbar\n"
@@ -354,15 +354,36 @@ int main(int argc, char** argv) {
     aimc::Player player;
     aimc::CreativeScreen creative;
     std::array<aimc::ItemRef, aimc::kHotbarSlots> hotbar = aimc::defaultHotbar();
+    aimc::Dimension dimension = aimc::Dimension::Overworld;
+    std::array<glm::vec3, aimc::kDimensionCount> dimensionPositions{};
+    std::array<float, aimc::kDimensionCount> dimensionYaw{};
+    std::array<float, aimc::kDimensionCount> dimensionPitch{};
+    for (int i = 0; i < aimc::kDimensionCount; ++i) {
+        dimensionPositions[static_cast<std::size_t>(i)] = glm::vec3(0.5f, 70.0f, 0.5f);
+        dimensionYaw[static_cast<std::size_t>(i)] = -90.0f;
+        dimensionPitch[static_cast<std::size_t>(i)] = -18.0f;
+    }
     int selected = 0;
     float timeOfDay = opt.timeOfDay;
 
     if (loaded) {
-        world.restoreEdits(std::move(saveData.edits), saveData.seed);
-        player.setPosition(saveData.playerPos);
+        world.reset(saveData.seed);
+        world.setDimensionEdits(aimc::Dimension::Overworld, saveData.dimensions[0].edits);
+        world.setDimensionEdits(aimc::Dimension::Nether, saveData.dimensions[1].edits);
+        dimension = saveData.current;
+        world.setDimension(dimension);
+        for (int i = 0; i < aimc::kDimensionCount; ++i) {
+            dimensionPositions[static_cast<std::size_t>(i)] =
+                saveData.dimensions[static_cast<std::size_t>(i)].playerPos;
+            dimensionYaw[static_cast<std::size_t>(i)] =
+                saveData.dimensions[static_cast<std::size_t>(i)].yaw;
+            dimensionPitch[static_cast<std::size_t>(i)] =
+                saveData.dimensions[static_cast<std::size_t>(i)].pitch;
+        }
+        player.setPosition(dimensionPositions[static_cast<std::size_t>(dimension)]);
         camera.pos = player.eyePosition();
-        camera.yawDeg = saveData.yaw;
-        camera.pitchDeg = saveData.pitch;
+        camera.yawDeg = dimensionYaw[static_cast<std::size_t>(dimension)];
+        camera.pitchDeg = dimensionPitch[static_cast<std::size_t>(dimension)];
         selected = std::clamp(saveData.selected, 0, aimc::kHotbarSlots - 1);
         hotbar = saveData.hotbar;
         timeOfDay = saveData.timeOfDay;
@@ -370,6 +391,7 @@ int main(int argc, char** argv) {
         camera.pos = glm::vec3(0.5f, 70.0f, 0.5f);
         camera.yawDeg = -90.0f;
         camera.pitchDeg = -18.0f;
+        dimensionPositions[1] = glm::vec3(0.5f, 40.0f, 0.5f);
     }
 
     const auto prewarmStart = std::chrono::steady_clock::now();
@@ -390,6 +412,9 @@ int main(int argc, char** argv) {
         }
         player.setPosition(glm::vec3(0.5f, static_cast<float>(surface) + 1.001f, 0.5f));
         camera.pos = player.eyePosition();
+        dimensionPositions[0] = player.position();
+        dimensionYaw[0] = camera.yawDeg;
+        dimensionPitch[0] = camera.pitchDeg;
     }
 
     if (opt.hasCamera) {
@@ -408,12 +433,15 @@ int main(int argc, char** argv) {
         creative.setTab(aimc::CreativeTab::Natural);
     } else if (opt.tab == "search") {
         creative.setTab(aimc::CreativeTab::Search);
+    } else if (opt.tab == "nether") {
+        creative.setTab(aimc::CreativeTab::Nether);
     } else if (opt.tab == "tools") {
         creative.setTab(aimc::CreativeTab::Tools);
     } else if (opt.tab == "building") {
         creative.setTab(aimc::CreativeTab::Building);
     } else if (!opt.tab.empty()) {
-        spdlog::warn("unknown --tab '{}', expected building, natural, tools or search", opt.tab);
+        spdlog::warn("unknown --tab '{}', expected building, natural, nether, tools or search",
+                     opt.tab);
     }
 
     glEnable(GL_DEPTH_TEST);
@@ -445,13 +473,25 @@ int main(int argc, char** argv) {
     const auto saveGame = [&](const std::string& path) -> bool {
         aimc::SaveData data;
         data.seed = world.seed();
-        data.playerPos = player.position();
-        data.yaw = camera.yawDeg;
-        data.pitch = camera.pitchDeg;
-        data.selected = selected;
         data.timeOfDay = timeOfDay;
+        data.selected = selected;
         data.hotbar = hotbar;
-        data.edits = world.snapshotEdits();
+        data.current = dimension;
+        const int active = static_cast<int>(dimension);
+        for (int i = 0; i < aimc::kDimensionCount; ++i) {
+            const std::size_t index = static_cast<std::size_t>(i);
+            aimc::DimensionSave& dim = data.dimensions[index];
+            if (i == active) {
+                dim.playerPos = player.position();
+                dim.yaw = camera.yawDeg;
+                dim.pitch = camera.pitchDeg;
+            } else {
+                dim.playerPos = dimensionPositions[index];
+                dim.yaw = dimensionYaw[index];
+                dim.pitch = dimensionPitch[index];
+            }
+            dim.edits = world.editsFor(static_cast<aimc::Dimension>(i));
+        }
         return aimc::saveWorld(path, data);
     };
 
@@ -460,11 +500,22 @@ int main(int argc, char** argv) {
         if (!aimc::loadWorld(path, data)) {
             return false;
         }
-        world.restoreEdits(std::move(data.edits), data.seed);
-        player.setPosition(data.playerPos);
+        world.reset(data.seed);
+        world.setDimensionEdits(aimc::Dimension::Overworld, data.dimensions[0].edits);
+        world.setDimensionEdits(aimc::Dimension::Nether, data.dimensions[1].edits);
+        dimension = data.current;
+        world.setDimension(dimension);
+        for (int i = 0; i < aimc::kDimensionCount; ++i) {
+            const std::size_t index = static_cast<std::size_t>(i);
+            dimensionPositions[index] = data.dimensions[index].playerPos;
+            dimensionYaw[index] = data.dimensions[index].yaw;
+            dimensionPitch[index] = data.dimensions[index].pitch;
+        }
+        const std::size_t active = static_cast<std::size_t>(dimension);
+        player.setPosition(dimensionPositions[active]);
         camera.pos = player.eyePosition();
-        camera.yawDeg = data.yaw;
-        camera.pitchDeg = data.pitch;
+        camera.yawDeg = dimensionYaw[active];
+        camera.pitchDeg = dimensionPitch[active];
         selected = std::clamp(data.selected, 0, aimc::kHotbarSlots - 1);
         hotbar = data.hotbar;
         timeOfDay = data.timeOfDay;
@@ -474,6 +525,8 @@ int main(int argc, char** argv) {
 
     const auto newWorld = [&]() {
         world.reset(opt.seed);
+        dimension = aimc::Dimension::Overworld;
+        world.setDimension(dimension);
         camera.pos = glm::vec3(0.5f, 70.0f, 0.5f);
         world.prewarm(camera.pos, settings.viewDistance, 30000);
         int surface = world.surfaceY(0, 0);
@@ -484,9 +537,62 @@ int main(int argc, char** argv) {
         camera.pos = player.eyePosition();
         camera.yawDeg = -90.0f;
         camera.pitchDeg = -18.0f;
+        for (int i = 0; i < aimc::kDimensionCount; ++i) {
+            dimensionYaw[static_cast<std::size_t>(i)] = -90.0f;
+            dimensionPitch[static_cast<std::size_t>(i)] = -18.0f;
+        }
+        dimensionPositions[0] = player.position();
+        dimensionPositions[1] = glm::vec3(0.5f, 40.0f, 0.5f);
         hotbar = aimc::defaultHotbar();
         selected = 0;
         timeOfDay = 0.42f;
+    };
+
+    float portalTimer = 0.0f;
+    float portalCooldown = 0.0f;
+
+    const auto travelToDimension = [&]() {
+        const aimc::Dimension target = dimension == aimc::Dimension::Overworld
+                                           ? aimc::Dimension::Nether
+                                           : aimc::Dimension::Overworld;
+        const std::size_t sourceIndex = static_cast<std::size_t>(dimension);
+        dimensionPositions[sourceIndex] = player.position();
+        dimensionYaw[sourceIndex] = camera.yawDeg;
+        dimensionPitch[sourceIndex] = camera.pitchDeg;
+
+        const glm::vec3 p = player.position();
+        const glm::ivec3 source(static_cast<int>(std::floor(p.x)),
+                                static_cast<int>(std::floor(p.y)),
+                                static_cast<int>(std::floor(p.z)));
+        const glm::ivec3 targetCoords =
+            aimc::scaleBetweenDimensions(source, dimension, target);
+
+        world.setDimension(target);
+        dimension = target;
+        world.prewarm(glm::vec3(static_cast<float>(targetCoords.x) + 0.5f, 40.0f,
+                                static_cast<float>(targetCoords.z) + 0.5f),
+                      settings.viewDistance, 30000);
+
+        glm::ivec3 dest{0, 0, 0};
+        glm::vec3 spawn;
+        if (aimc::findPortalNear(world, targetCoords, 16, dest)) {
+            spawn = glm::vec3(static_cast<float>(dest.x) + 0.5f,
+                              static_cast<float>(dest.y) + 0.01f,
+                              static_cast<float>(dest.z) + 0.5f);
+        } else if (!aimc::buildPortalAt(world, targetCoords, spawn)) {
+            spawn = glm::vec3(static_cast<float>(targetCoords.x) + 0.5f, 48.0f,
+                              static_cast<float>(targetCoords.z) + 0.5f);
+        }
+        player.setPosition(spawn);
+        camera.pos = player.eyePosition();
+        const std::size_t targetIndex = static_cast<std::size_t>(target);
+        dimensionPositions[targetIndex] = player.position();
+        dimensionYaw[targetIndex] = camera.yawDeg;
+        dimensionPitch[targetIndex] = camera.pitchDeg;
+        portalTimer = 0.0f;
+        portalCooldown = 2.5f;
+        status = std::string("entered the ") + aimc::dimensionName(target);
+        audio.play(aimc::Audio::Sound::Ignite, 0.6f);
     };
 
     while (running) {
@@ -647,12 +753,41 @@ int main(int argc, char** argv) {
             }
             camera.pos = player.eyePosition();
 
-            if (player.position().y < -30.0f) {
-                int surface = world.surfaceY(0, 0);
-                if (surface < 0) {
-                    surface = 40;
+            const glm::vec3 feet = player.position();
+            bool inPortal = false;
+            for (const float dy : {0.1f, 0.9f, 1.7f}) {
+                const aimc::BlockId block =
+                    world.getBlock(static_cast<int>(std::floor(feet.x)),
+                                   static_cast<int>(std::floor(feet.y + dy)),
+                                   static_cast<int>(std::floor(feet.z)));
+                if (aimc::isPortalBlock(block)) {
+                    inPortal = true;
+                    break;
                 }
-                player.setPosition(glm::vec3(0.5f, static_cast<float>(surface) + 1.001f, 0.5f));
+            }
+            if (portalCooldown > 0.0f) {
+                portalCooldown = std::max(0.0f, portalCooldown - dt);
+            }
+            if (inPortal && portalCooldown <= 0.0f) {
+                portalTimer += dt;
+                if (portalTimer >= 1.0f) {
+                    travelToDimension();
+                }
+            } else if (!inPortal) {
+                portalTimer = 0.0f;
+            }
+
+            if (player.position().y < -30.0f) {
+                if (dimension == aimc::Dimension::Overworld) {
+                    int surface = world.surfaceY(0, 0);
+                    if (surface < 0) {
+                        surface = 40;
+                    }
+                    player.setPosition(
+                        glm::vec3(0.5f, static_cast<float>(surface) + 1.001f, 0.5f));
+                } else {
+                    player.setPosition(glm::vec3(0.5f, 40.0f, 0.5f));
+                }
                 camera.pos = player.eyePosition();
             }
         } else {
@@ -692,6 +827,7 @@ int main(int argc, char** argv) {
         const auto blockGetter = [&world](int x, int y, int z) -> aimc::BlockId {
             const aimc::BlockId block = world.getBlock(x, y, z);
             const bool passThrough = block == aimc::BLOCK_WATER ||
+                                     block == aimc::BLOCK_LAVA ||
                                      block == aimc::BLOCK_PORTAL_X ||
                                      block == aimc::BLOCK_PORTAL_Z;
             return passThrough ? aimc::BLOCK_AIR : block;
@@ -718,7 +854,8 @@ int main(int argc, char** argv) {
             } else if (clickPlace && hit.hit && !held.empty()) {
                 const glm::ivec3 target = hit.block + hit.normal;
                 const aimc::BlockId existing = world.getBlock(target.x, target.y, target.z);
-                if (existing == aimc::BLOCK_AIR || existing == aimc::BLOCK_WATER) {
+                if (existing == aimc::BLOCK_AIR || existing == aimc::BLOCK_WATER ||
+                    existing == aimc::BLOCK_LAVA) {
                     const glm::vec3 pmin = player.position() - glm::vec3(0.3f, 0.0f, 0.3f);
                     const glm::vec3 pmax = player.position() + glm::vec3(0.3f, 1.8f, 0.3f);
                     const bool overlaps =
@@ -760,7 +897,9 @@ int main(int argc, char** argv) {
         const int height = window.height();
         glViewport(0, 0, width, height);
 
-        const aimc::SkyState skyState = aimc::computeSky(timeOfDay);
+        const aimc::SkyState skyState = dimension == aimc::Dimension::Nether
+                                            ? aimc::computeNetherSky(timeOfDay)
+                                            : aimc::computeSky(timeOfDay);
         glm::vec3 fogColor = skyState.fogColor;
         glm::vec2 fogRange;
         if (opt.fogStart >= 0.0f && opt.fogEnd > opt.fogStart) {
@@ -771,13 +910,18 @@ int main(int argc, char** argv) {
         }
         float lightScale = skyState.light;
 
-        if (interactive &&
+        const aimc::BlockId eyeBlock =
             world.getBlock(static_cast<int>(std::floor(camera.pos.x)),
                            static_cast<int>(std::floor(camera.pos.y)),
-                           static_cast<int>(std::floor(camera.pos.z))) == aimc::BLOCK_WATER) {
+                           static_cast<int>(std::floor(camera.pos.z)));
+        if (interactive && eyeBlock == aimc::BLOCK_WATER) {
             fogRange = glm::vec2(0.5f, 18.0f);
             fogColor = glm::vec3(0.06f, 0.22f, 0.34f) * (0.4f + 0.6f * skyState.dayFactor);
             lightScale *= 0.75f;
+        } else if (interactive && eyeBlock == aimc::BLOCK_LAVA) {
+            fogRange = glm::vec2(0.2f, 6.0f);
+            fogColor = glm::vec3(1.0f, 0.42f, 0.06f);
+            lightScale = 1.0f;
         }
 
         glClearColor(skyState.horizon.x, skyState.horizon.y, skyState.horizon.z, 1.0f);
@@ -786,7 +930,9 @@ int main(int argc, char** argv) {
         const glm::mat4 viewProj = camera.viewProj(window.aspect());
         const aimc::Frustum frustum = aimc::Frustum::fromViewProj(viewProj);
 
-        sky.draw(camera, glm::inverse(viewProj), skyState);
+        if (dimension == aimc::Dimension::Overworld) {
+            sky.draw(camera, glm::inverse(viewProj), skyState);
+        }
 
         shader.use();
         shader.setMat4("uViewProj", viewProj);
@@ -800,6 +946,15 @@ int main(int argc, char** argv) {
         glBindTexture(GL_TEXTURE_2D, atlas.texture());
 
         aimc::DrawStats stats = world.drawOpaque(frustum);
+
+        // Lava is an opaque liquid but emits its own light.
+        shader.setFloat("uLight", 1.0f);
+        glDisable(GL_CULL_FACE);
+        const aimc::DrawStats lavaStats = world.drawLava(frustum);
+        glEnable(GL_CULL_FACE);
+        shader.setFloat("uLight", lightScale);
+        stats.drawCalls += lavaStats.drawCalls;
+        stats.triangles += lavaStats.triangles;
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

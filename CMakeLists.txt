@@ -55,6 +55,7 @@ add_library(aimc_core STATIC
   src/render/screenshot.cpp
   src/world/block.cpp
   src/world/chunk.cpp
+  src/world/dimension.cpp
   src/world/save.cpp
   src/world/portal.cpp
   src/world/terrain.cpp

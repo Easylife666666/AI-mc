@@ -24,6 +24,12 @@ const BlockDef kDefs[BLOCK_COUNT] = {
     {"Obsidian",        17,  17,   17,  true,  true},
     {"Nether Portal",   18,  18,   18,  false, false},
     {"Nether Portal",   18,  18,   18,  false, false},
+    {"Netherrack",      19,  19,   19,  true,  true},
+    {"Soul Sand",       20,  20,   20,  true,  true},
+    {"Glowstone",       21,  21,   21,  true,  true},
+    {"Bedrock",         22,  22,   22,  true,  true},
+    {"Lava",            23,  23,   23,  false, false},
+    {"Nether Bricks",   24,  24,   24,  true,  true},
 };
 
 }  // namespace
@@ -38,5 +44,6 @@ const BlockDef& blockDef(BlockId id) {
 
 bool isOpaque(BlockId id) { return blockDef(id).opaque; }
 bool isSolid(BlockId id) { return blockDef(id).solid; }
+bool isLiquid(BlockId id) { return id == BLOCK_WATER || id == BLOCK_LAVA; }
 
 }  // namespace aimc

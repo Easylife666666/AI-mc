@@ -20,6 +20,9 @@ struct SkyState {
 
 SkyState computeSky(float timeOfDay);
 
+// The nether has no day/night cycle: a warm, dim fog and no sun or stars.
+SkyState computeNetherSky(float timeOfDay);
+
 class Sky {
 public:
     Sky() = default;

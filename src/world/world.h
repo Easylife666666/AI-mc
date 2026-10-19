@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -13,6 +14,7 @@
 
 #include "render/chunk_mesh.h"
 #include "world/block.h"
+#include "world/dimension.h"
 #include "world/chunk.h"
 
 namespace aimc {
@@ -49,6 +51,7 @@ public:
 
     DrawStats drawOpaque(const Frustum& frustum) const;
     DrawStats drawWater(const Frustum& frustum) const;
+    DrawStats drawLava(const Frustum& frustum) const;
     DrawStats drawPortal(const Frustum& frustum) const;
 
     BlockId getBlock(int worldX, int worldY, int worldZ) const;
@@ -56,6 +59,12 @@ public:
     int surfaceY(int worldX, int worldZ) const;
 
     int seed() const { return m_seed; }
+    Dimension dimension() const { return m_dimension; }
+    void setDimension(Dimension dim);
+    std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> editsFor(
+        Dimension dim) const;
+    void setDimensionEdits(Dimension dim,
+                           std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> edits);
     std::size_t chunkCount() const;
     bool chunkReady(int cx, int cz) const;
 
@@ -93,6 +102,10 @@ private:
 
     mutable std::mutex m_editsMutex;
     std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> m_edits;
+    std::array<std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>>,
+               kDimensionCount>
+        m_storedEdits;
+    Dimension m_dimension = Dimension::Overworld;
 
     tbb::task_group m_group;
     tbb::concurrent_queue<MeshResult> m_meshQueue;

@@ -25,6 +25,7 @@ struct MeshData {
 struct ChunkMeshData {
     MeshData opaque;
     MeshData water;
+    MeshData lava;    // emissive liquid, drawn opaque
     MeshData portal;  // emissive, so it keeps glowing at night
 };
 

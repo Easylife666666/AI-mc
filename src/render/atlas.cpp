@@ -180,6 +180,65 @@ glm::vec3 tileColor(int tile, int x, int y) {
         }
         return c;
     }
+    case 19: {  // netherrack: dark red, crumbly
+        glm::vec3 c = mixv({0.26f, 0.07f, 0.07f}, {0.55f, 0.20f, 0.18f},
+                           valueNoise(u * 7.0f, v * 7.0f, 211));
+        if (hash01(x, y, 212) < 0.14f) {
+            c *= 0.76f;
+        }
+        if (hash01(x, y, 213) < 0.05f) {
+            c = mixv(c, {0.62f, 0.28f, 0.24f}, 0.6f);
+        }
+        return c;
+    }
+    case 20: {  // soul sand: brown with dark blotches
+        glm::vec3 c = mixv({0.34f, 0.24f, 0.19f}, {0.55f, 0.41f, 0.33f},
+                           valueNoise(u * 6.0f, v * 6.0f, 221));
+        if (valueNoise(u * 4.0f + 3.1f, v * 4.0f + 1.7f, 222) > 0.62f) {
+            c *= 0.70f;
+        }
+        return c;
+    }
+    case 21: {  // glowstone
+        glm::vec3 c = mixv({0.55f, 0.32f, 0.08f}, {1.0f, 0.80f, 0.32f},
+                           valueNoise(u * 7.0f, v * 7.0f, 231));
+        if (hash01(x, y, 232) < 0.18f) {
+            c = mixv(c, {1.0f, 0.95f, 0.62f}, 0.8f);
+        }
+        if (hash01(x, y, 233) < 0.08f) {
+            c *= 0.72f;
+        }
+        return c;
+    }
+    case 22: {  // bedrock
+        const float n = valueNoise(u * 8.0f, v * 8.0f, 241);
+        if (n < 0.35f) {
+            return glm::vec3(0.08f, 0.08f, 0.09f);
+        }
+        if (n > 0.72f) {
+            return glm::vec3(0.40f, 0.40f, 0.42f);
+        }
+        return mixv({0.16f, 0.16f, 0.17f}, {0.30f, 0.30f, 0.32f}, n);
+    }
+    case 23: {  // lava
+        const float swirl = std::sin(static_cast<float>(x) * 0.7f +
+                                     static_cast<float>(y) * 0.9f +
+                                     valueNoise(u * 4.0f, v * 4.0f, 251) * 5.0f);
+        glm::vec3 c = mixv({0.75f, 0.18f, 0.02f}, {1.0f, 0.62f, 0.05f},
+                           0.5f + 0.5f * swirl);
+        if (valueNoise(u * 6.0f, v * 6.0f, 252) < 0.25f) {
+            c = mixv(c, {0.35f, 0.08f, 0.02f}, 0.55f);
+        }
+        return c;
+    }
+    case 24: {  // nether bricks
+        const int row = y / 4;
+        const int shift = (row % 2) * 4;
+        const glm::vec3 brick = mixv({0.24f, 0.07f, 0.08f}, {0.38f, 0.13f, 0.13f},
+                                     valueNoise(u * 7.0f, v * 7.0f, 261));
+        const bool mortar = (y % 4 == 3) || ((x + shift) % 8 == 7);
+        return mortar ? glm::vec3(0.12f, 0.10f, 0.10f) : brick;
+    }
     case 18: {  // nether portal swirl
         const float swirl = std::sin((static_cast<float>(x) * 0.9f +
                                       static_cast<float>(y) * 0.55f) * 0.9f +

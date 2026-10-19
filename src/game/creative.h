@@ -15,6 +15,7 @@ namespace aimc {
 enum class CreativeTab : int {
     Building,
     Natural,
+    Nether,
     Tools,
     Search,
     Count,

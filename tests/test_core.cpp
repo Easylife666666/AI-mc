@@ -250,14 +250,25 @@ TEST(Raycast, VerticalHitNormal) {
 TEST(Save, RoundtripPreservesData) {
     SaveData data;
     data.seed = 4242;
-    data.playerPos = glm::vec3(12.5f, 30.25f, -4.75f);
-    data.yaw = 45.0f;
-    data.pitch = -12.0f;
     data.selected = 6;
     data.timeOfDay = 0.625f;
     data.hotbar[0] = ItemRef::ofBlock(BLOCK_SNOW);
     data.hotbar[4] = ItemRef::ofItem(ItemId::FlintAndSteel);
-    data.edits[0x0000000100000002ull][123] = static_cast<std::uint8_t>(BLOCK_STONE);
+    data.current = Dimension::Nether;
+
+    DimensionSave& overworld = data.dimensions[0];
+    overworld.playerPos = glm::vec3(12.5f, 30.25f, -4.75f);
+    overworld.yaw = 45.0f;
+    overworld.pitch = -12.0f;
+    overworld.edits[0x0000000100000002ull][123] =
+        static_cast<std::uint8_t>(BLOCK_STONE);
+
+    DimensionSave& nether = data.dimensions[1];
+    nether.playerPos = glm::vec3(-8.0f, 40.0f, 8.0f);
+    nether.yaw = 10.0f;
+    nether.pitch = -5.0f;
+    nether.edits[0x0000000000000001ull][7] =
+        static_cast<std::uint8_t>(BLOCK_NETHERRACK);
 
     ASSERT_TRUE(saveWorld("aimc_test_save.aimc", data));
 
@@ -266,17 +277,30 @@ TEST(Save, RoundtripPreservesData) {
     std::remove("aimc_test_save.aimc");
 
     EXPECT_EQ(loaded.seed, 4242);
-    EXPECT_FLOAT_EQ(loaded.playerPos.x, 12.5f);
-    EXPECT_FLOAT_EQ(loaded.playerPos.y, 30.25f);
-    EXPECT_FLOAT_EQ(loaded.playerPos.z, -4.75f);
-    EXPECT_FLOAT_EQ(loaded.yaw, 45.0f);
-    EXPECT_FLOAT_EQ(loaded.pitch, -12.0f);
     EXPECT_EQ(loaded.selected, 6);
     EXPECT_FLOAT_EQ(loaded.timeOfDay, 0.625f);
     EXPECT_EQ(loaded.hotbar, data.hotbar);
-    ASSERT_EQ(loaded.edits.size(), 1u);
-    ASSERT_EQ(loaded.edits.begin()->second.size(), 1u);
-    EXPECT_EQ(loaded.edits.begin()->second.at(123), static_cast<std::uint8_t>(BLOCK_STONE));
+    EXPECT_EQ(loaded.current, Dimension::Nether);
+
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].playerPos.x, 12.5f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].playerPos.y, 30.25f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].playerPos.z, -4.75f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].yaw, 45.0f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].pitch, -12.0f);
+
+    EXPECT_FLOAT_EQ(loaded.dimensions[1].playerPos.x, -8.0f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[1].playerPos.y, 40.0f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[1].yaw, 10.0f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[1].pitch, -5.0f);
+
+    ASSERT_EQ(loaded.dimensions[0].edits.size(), 1u);
+    ASSERT_EQ(loaded.dimensions[0].edits.begin()->second.size(), 1u);
+    EXPECT_EQ(loaded.dimensions[0].edits.begin()->second.at(123),
+              static_cast<std::uint8_t>(BLOCK_STONE));
+    ASSERT_EQ(loaded.dimensions[1].edits.size(), 1u);
+    ASSERT_EQ(loaded.dimensions[1].edits.begin()->second.size(), 1u);
+    EXPECT_EQ(loaded.dimensions[1].edits.begin()->second.at(7),
+              static_cast<std::uint8_t>(BLOCK_NETHERRACK));
 }
 
 TEST(Settings, RoundtripClamps) {
@@ -541,7 +565,12 @@ TEST(Save, LoadsVersion1WithoutHotbar) {
     EXPECT_EQ(loaded.selected, 2);
     EXPECT_FLOAT_EQ(loaded.timeOfDay, 0.5f);
     EXPECT_EQ(loaded.hotbar, defaultHotbar());
-    EXPECT_TRUE(loaded.edits.empty());
+    EXPECT_EQ(loaded.current, Dimension::Overworld);
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].playerPos.x, 1.0f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].playerPos.y, 2.0f);
+    EXPECT_FLOAT_EQ(loaded.dimensions[0].yaw, 45.0f);
+    EXPECT_TRUE(loaded.dimensions[0].edits.empty());
+    EXPECT_TRUE(loaded.dimensions[1].edits.empty());
 }
 
 TEST(Save, RejectsNewerVersion) {
@@ -870,6 +899,219 @@ TEST(Portal, LightsInARealWorld) {
     EXPECT_EQ(world.getBlock(1, y0 + 1, z), BLOCK_PORTAL_Z);
     EXPECT_EQ(world.getBlock(2, y0 + 3, z), BLOCK_PORTAL_Z);
     EXPECT_EQ(world.getBlock(0, y0, z), BLOCK_OBSIDIAN);
+}
+
+TEST(Dimension, ScalesCoordinates) {
+    EXPECT_EQ(scaleBetweenDimensions(glm::ivec3(16, 30, -16), Dimension::Overworld,
+                                     Dimension::Nether),
+              glm::ivec3(2, 30, -2));
+    EXPECT_EQ(scaleBetweenDimensions(glm::ivec3(15, 30, 15), Dimension::Overworld,
+                                     Dimension::Nether),
+              glm::ivec3(1, 30, 1));
+    EXPECT_EQ(scaleBetweenDimensions(glm::ivec3(-1, 30, -9), Dimension::Overworld,
+                                     Dimension::Nether),
+              glm::ivec3(-1, 30, -2));
+    EXPECT_EQ(scaleBetweenDimensions(glm::ivec3(2, 30, -2), Dimension::Nether,
+                                     Dimension::Overworld),
+              glm::ivec3(16, 30, -16));
+    EXPECT_EQ(scaleBetweenDimensions(glm::ivec3(3, 30, 4), Dimension::Nether,
+                                     Dimension::Nether),
+              glm::ivec3(3, 30, 4));
+    EXPECT_STREQ(dimensionName(Dimension::Nether), "Nether");
+    EXPECT_STREQ(dimensionName(Dimension::Overworld), "Overworld");
+}
+
+TEST(NetherTerrain, GeneratesShelvesLavaAndRoof) {
+    NetherTerrain terrain(7);
+    int lavaCount = 0;
+
+    for (int cz = 0; cz < 2; ++cz) {
+        for (int cx = 0; cx < 2; ++cx) {
+            Chunk chunk(glm::ivec2(cx, cz));
+            terrain.generate(chunk);
+
+            for (int x = 0; x < Chunk::SX; ++x) {
+                for (int z = 0; z < Chunk::SZ; ++z) {
+                    EXPECT_EQ(chunk.get(x, 0, z), static_cast<std::uint8_t>(BLOCK_BEDROCK));
+                    EXPECT_EQ(chunk.get(x, Chunk::SY - 1, z),
+                              static_cast<std::uint8_t>(BLOCK_BEDROCK));
+
+                    const int h = terrain.heightAt(cx * Chunk::SX + x, cz * Chunk::SZ + z);
+                    EXPECT_GE(h, NetherTerrain::LavaLevel - 4);
+                    EXPECT_LE(h, Chunk::SY - 14);
+
+                    const std::uint8_t surface = chunk.get(x, h, z);
+                    EXPECT_TRUE(surface == static_cast<std::uint8_t>(BLOCK_NETHERRACK) ||
+                                surface == static_cast<std::uint8_t>(BLOCK_SOUL_SAND));
+
+                    if (h < NetherTerrain::LavaLevel) {
+                        EXPECT_EQ(chunk.get(x, NetherTerrain::LavaLevel, z),
+                                  static_cast<std::uint8_t>(BLOCK_LAVA));
+                    }
+                }
+            }
+
+            for (const std::uint8_t block : chunk.rawBlocks()) {
+                EXPECT_NE(block, static_cast<std::uint8_t>(BLOCK_WATER));
+                EXPECT_NE(block, static_cast<std::uint8_t>(BLOCK_LOG));
+                lavaCount += block == static_cast<std::uint8_t>(BLOCK_LAVA) ? 1 : 0;
+            }
+        }
+    }
+    (void)lavaCount;
+
+    // Find a valley below the lava level and make sure the sea is there.
+    int valleyX = 0;
+    int valleyZ = 0;
+    bool found = false;
+    for (int z = -64; z <= 64 && !found; ++z) {
+        for (int x = -64; x <= 64 && !found; ++x) {
+            if (terrain.heightAt(x, z) < NetherTerrain::LavaLevel) {
+                valleyX = x;
+                valleyZ = z;
+                found = true;
+            }
+        }
+    }
+    ASSERT_TRUE(found);
+    const int cx = floorDiv(valleyX, Chunk::SX);
+    const int cz = floorDiv(valleyZ, Chunk::SZ);
+    Chunk valley(glm::ivec2(cx, cz));
+    terrain.generate(valley);
+    EXPECT_EQ(valley.get(floorMod(valleyX, Chunk::SX), NetherTerrain::LavaLevel,
+                         floorMod(valleyZ, Chunk::SZ)),
+              static_cast<std::uint8_t>(BLOCK_LAVA));
+
+    Chunk a(glm::ivec2(3, -2));
+    Chunk b(glm::ivec2(3, -2));
+    terrain.generate(a);
+    terrain.generate(b);
+    EXPECT_EQ(a.rawBlocks(), b.rawBlocks());
+}
+
+TEST(World, DimensionsKeepSeparateEdits) {
+    World world;
+    world.init(5);
+
+    std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> overworldEdits;
+    overworldEdits[0x0000000000000000ull][1] = static_cast<std::uint8_t>(BLOCK_STONE);
+    std::map<std::uint64_t, std::map<std::uint32_t, std::uint8_t>> netherEdits;
+    netherEdits[0x0000000000000000ull][2] = static_cast<std::uint8_t>(BLOCK_NETHERRACK);
+
+    world.setDimensionEdits(Dimension::Overworld, overworldEdits);
+    world.setDimensionEdits(Dimension::Nether, netherEdits);
+    EXPECT_EQ(world.dimension(), Dimension::Overworld);
+    EXPECT_EQ(world.editsFor(Dimension::Overworld), overworldEdits);
+    EXPECT_EQ(world.editsFor(Dimension::Nether), netherEdits);
+
+    world.setDimension(Dimension::Nether);
+    EXPECT_EQ(world.dimension(), Dimension::Nether);
+    EXPECT_EQ(world.editsFor(Dimension::Nether), netherEdits);
+    EXPECT_EQ(world.editsFor(Dimension::Overworld), overworldEdits);
+
+    world.setDimension(Dimension::Overworld);
+    EXPECT_EQ(world.editsFor(Dimension::Overworld), overworldEdits);
+}
+
+TEST(Creative, NetherTabHasNetherBlocks) {
+    const std::vector<ItemRef>& nether = creativeTabItems(CreativeTab::Nether);
+    EXPECT_NE(std::find(nether.begin(), nether.end(), ItemRef::ofBlock(BLOCK_NETHERRACK)),
+              nether.end());
+    EXPECT_NE(std::find(nether.begin(), nether.end(), ItemRef::ofBlock(BLOCK_LAVA)),
+              nether.end());
+    EXPECT_NE(std::find(nether.begin(), nether.end(), ItemRef::ofBlock(BLOCK_GLOWSTONE)),
+              nether.end());
+}
+
+TEST(Portal, BuildsDestinationPortal) {
+    Atlas atlas;
+    World world;
+    world.init(11);
+    world.setAtlas(&atlas);
+    world.update(glm::vec3(0.5f, 64.0f, 0.5f), 1, false);
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_NE(world.getBlock(0, 0, 0), BLOCK_AIR);
+
+    glm::vec3 spawn{};
+    ASSERT_TRUE(buildPortalAt(world, glm::ivec3(3, 0, 3), spawn));
+    EXPECT_GE(spawn.y, 2.0f);
+
+    glm::ivec3 found{};
+    ASSERT_TRUE(findPortalNear(world, glm::ivec3(3, 0, 3), 4, found));
+    EXPECT_TRUE(isPortalBlock(world.getBlock(found.x, found.y, found.z)));
+    EXPECT_EQ(found.z, 3);
+}
+
+TEST(Portal, TravelSequenceBuildsNetherSide) {
+    Atlas atlas;
+    World world;
+    world.init(3);
+    world.setAtlas(&atlas);
+    world.update(glm::vec3(0.5f, 64.0f, 0.5f), 2, false);
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_NE(world.getBlock(0, 0, 0), BLOCK_AIR);
+
+    glm::vec3 spawn{};
+    ASSERT_TRUE(buildPortalAt(world, glm::ivec3(0, 0, 0), spawn));
+
+    world.setDimension(Dimension::Nether);
+    world.update(glm::vec3(0.5f, 40.0f, 0.5f), 2, false);
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_EQ(world.getBlock(0, 0, 0), BLOCK_BEDROCK);
+
+    glm::vec3 netherSpawn{};
+    ASSERT_TRUE(buildPortalAt(world, glm::ivec3(0, 0, 0), netherSpawn));
+    glm::ivec3 found{};
+    ASSERT_TRUE(findPortalNear(world, glm::ivec3(0, 0, 0), 6, found));
+    EXPECT_TRUE(isPortalBlock(world.getBlock(found.x, found.y, found.z)));
+}
+
+TEST(Save, LoadsVersion3WithItems) {
+    const char* path = "aimc_test_save_v3.aimc";
+    gzFile file = gzopen(path, "wb6");
+    ASSERT_NE(file, nullptr);
+
+    const char magic[4] = {'A', 'I', 'M', 'C'};
+    const std::uint32_t version = 3;
+    const std::int32_t seed = 99;
+    const float pose[5] = {4.0f, 5.0f, 6.0f, -90.0f, -20.0f};
+    const std::int32_t selected = 0;
+    const float time = 0.75f;
+    std::uint8_t hotbar[18] = {};
+    hotbar[0] = 0;  // empty block
+    hotbar[1] = 1;  // flint and steel
+    hotbar[2] = 3;  // stone block
+    hotbar[3] = 0;  // no item
+    hotbar[16] = 9;  // water
+    hotbar[17] = 0;
+    const std::uint32_t chunks = 0;
+    ASSERT_EQ(gzwrite(file, magic, 4), 4);
+    ASSERT_EQ(gzwrite(file, &version, 4), 4);
+    ASSERT_EQ(gzwrite(file, &seed, 4), 4);
+    ASSERT_EQ(gzwrite(file, pose, static_cast<unsigned int>(sizeof(pose))),
+              static_cast<int>(sizeof(pose)));
+    ASSERT_EQ(gzwrite(file, &selected, 4), 4);
+    ASSERT_EQ(gzwrite(file, &time, 4), 4);
+    ASSERT_EQ(gzwrite(file, hotbar, sizeof(hotbar)), static_cast<int>(sizeof(hotbar)));
+    ASSERT_EQ(gzwrite(file, &chunks, 4), 4);
+    ASSERT_EQ(gzclose(file), Z_OK);
+
+    SaveData loaded;
+    ASSERT_TRUE(loadWorld(path, loaded));
+    std::remove(path);
+
+    EXPECT_EQ(loaded.seed, 99);
+    EXPECT_EQ(loaded.current, Dimension::Overworld);
+    EXPECT_EQ(loaded.hotbar[0], ItemRef::ofItem(ItemId::FlintAndSteel));
+    EXPECT_EQ(loaded.hotbar[1], ItemRef::ofBlock(BLOCK_STONE));
+    EXPECT_EQ(loaded.hotbar[8], ItemRef::ofBlock(BLOCK_WATER));
+    EXPECT_TRUE(loaded.dimensions[0].edits.empty());
 }
 
 }  // namespace
