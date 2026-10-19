@@ -5,7 +5,9 @@ namespace {
 
 const BlockDef kDefs[BLOCK_COUNT] = {
     // name             top bottom side  solid  opaque
-    {"Air",              0,   0,    0,  false, false},
+    // Air has no texture: tile 15 is unused, so a missed AIR check shows up
+    // as the magenta debug tile instead of silently drawing another block.
+    {"Air",             15,  15,   15,  false, false},
     {"Grass Block",      0,   2,    1,  true,  true},   // tile 0 grass top, 1 side, 2 dirt
     {"Dirt",             2,   2,    2,  true,  true},
     {"Stone",            3,   3,    3,  true,  true},

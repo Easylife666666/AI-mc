@@ -176,16 +176,19 @@ void DebugUI::drawHud(const RayHit& hit, const BlockId* hotbarBlocks, int hotbar
                       5.0f, 0, chosen ? 2.0f : 1.0f);
 
         const BlockId block = hotbarBlocks[i];
-        const glm::vec4 uv = atlas.tileUV(blockDef(block).tileSide);
-        // OpenGL v=0 is the bottom of the atlas; ImGui's (0,0) is the top.
-        draw->AddImage(texture, ImVec2(p0.x + 6.0f, p0.y + 6.0f), ImVec2(p1.x - 6.0f, p1.y - 6.0f),
-                       ImVec2(uv.x, uv.w), ImVec2(uv.z, uv.y));
+        if (block != BLOCK_AIR) {
+            const glm::vec4 uv = atlas.tileUV(blockDef(block).tileSide);
+            // OpenGL v=0 is the bottom of the atlas; ImGui's (0,0) is the top.
+            draw->AddImage(texture, ImVec2(p0.x + 6.0f, p0.y + 6.0f),
+                           ImVec2(p1.x - 6.0f, p1.y - 6.0f), ImVec2(uv.x, uv.w),
+                           ImVec2(uv.z, uv.y));
+        }
 
         char label[2] = {static_cast<char>('1' + i), '\0'};
         draw->AddText(ImVec2(p0.x + 4.0f, p0.y + 2.0f), IM_COL32(255, 255, 255, 190), label);
     }
 
-    if (selected >= 0 && selected < hotbarCount) {
+    if (selected >= 0 && selected < hotbarCount && hotbarBlocks[selected] != BLOCK_AIR) {
         const char* name = blockDef(hotbarBlocks[selected]).name;
         const ImVec2 size = ImGui::CalcTextSize(name);
         draw->AddText(ImVec2((display.x - size.x) * 0.5f, y0 - 22.0f),

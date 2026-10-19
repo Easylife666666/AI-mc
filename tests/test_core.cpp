@@ -571,4 +571,18 @@ TEST(Creative, HotbarClicksPlaceAndPickUp) {
     EXPECT_EQ(bar[0], BLOCK_GRASS);
 }
 
+TEST(Block, AirTextureIsReserved) {
+    // Air must not point at a real tile: the HUD and item icons skip air, and a
+    // missed check should show the unused magenta tile, not another block.
+    const int airTile = blockDef(BLOCK_AIR).tileSide;
+    EXPECT_EQ(blockDef(BLOCK_AIR).tileTop, airTile);
+    EXPECT_EQ(blockDef(BLOCK_AIR).tileBottom, airTile);
+    for (int i = 1; i < static_cast<int>(BLOCK_COUNT); ++i) {
+        const BlockDef& def = blockDef(static_cast<BlockId>(i));
+        EXPECT_NE(def.tileTop, airTile) << def.name;
+        EXPECT_NE(def.tileBottom, airTile) << def.name;
+        EXPECT_NE(def.tileSide, airTile) << def.name;
+    }
+}
+
 }  // namespace

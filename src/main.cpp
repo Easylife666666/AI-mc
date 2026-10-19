@@ -421,6 +421,7 @@ int main(int argc, char** argv) {
     std::string status =
         loaded ? "loaded " + savePath : "new world, seed " + std::to_string(world.seed());
     bool mouseCaptured = false;
+    int mouseSkipFrames = 0;
     bool sprinting = false;
     bool sprintActive = false;
     Uint64 lastWTapMs = 0;
@@ -572,6 +573,28 @@ int main(int argc, char** argv) {
         if (wantCapture != mouseCaptured) {
             window.setRelativeMouse(wantCapture);
             mouseCaptured = wantCapture;
+            if (wantCapture) {
+                // Drop the motion accumulated while a GUI was open. Enabling
+                // relative mode also warps the pointer to the window centre and
+                // SDL reports that warp as a big delta on the next frame.
+                SDL_GetRelativeMouseState(nullptr, nullptr);
+                mouseSkipFrames = 2;
+            } else {
+                mouseSkipFrames = 0;
+            }
+        }
+
+        // Drain the relative state every frame so nothing piles up while a GUI
+        // is open; the camera only sees motion while the mouse is captured.
+        int mouseDX = 0;
+        int mouseDY = 0;
+        SDL_GetRelativeMouseState(&mouseDX, &mouseDY);
+        if (!wantCapture || mouseSkipFrames > 0) {
+            mouseDX = 0;
+            mouseDY = 0;
+        }
+        if (mouseSkipFrames > 0) {
+            --mouseSkipFrames;
         }
         if (!wantCapture) {
             sprinting = false;
@@ -593,11 +616,8 @@ int main(int argc, char** argv) {
             input.boost = keys[SDL_SCANCODE_LSHIFT] != 0;
             sprintActive = input.sprint;
 
-            int mouseX = 0;
-            int mouseY = 0;
-            SDL_GetRelativeMouseState(&mouseX, &mouseY);
-            camera.yawDeg += static_cast<float>(mouseX) * settings.sensitivity;
-            camera.pitchDeg -= static_cast<float>(mouseY) * settings.sensitivity;
+            camera.yawDeg += static_cast<float>(mouseDX) * settings.sensitivity;
+            camera.pitchDeg -= static_cast<float>(mouseDY) * settings.sensitivity;
             camera.pitchDeg = std::clamp(camera.pitchDeg, -89.0f, 89.0f);
 
             if (settings.dayLength > 0.0f) {
