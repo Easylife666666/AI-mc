@@ -15,6 +15,10 @@ enum BlockId : std::uint8_t {
     BLOCK_PLANKS,
     BLOCK_COBBLE,
     BLOCK_WATER,
+    BLOCK_GRAVEL,
+    BLOCK_STONE_BRICKS,
+    BLOCK_BRICKS,
+    BLOCK_SNOW,
     BLOCK_COUNT
 };
 

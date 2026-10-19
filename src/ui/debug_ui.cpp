@@ -126,6 +126,7 @@ UiActions DebugUI::draw(const Camera& camera, const World& world, const DrawStat
         ImGui::TextWrapped("%s", status.c_str());
         ImGui::TextDisabled("WASD move  double-tap W sprint");
         ImGui::TextDisabled("Space jump  F fly  Shift boosts flight");
+        ImGui::TextDisabled("E creative inventory");
         ImGui::TextDisabled("LMB break  RMB place  1-9 select");
         ImGui::TextDisabled("F1 close panel and capture mouse  Esc quit");
     }
@@ -133,8 +134,8 @@ UiActions DebugUI::draw(const Camera& camera, const World& world, const DrawStat
     return actions;
 }
 
-void DebugUI::drawHud(const RayHit& hit, const int* hotbarBlocks, int hotbarCount, int selected,
-                      const Atlas& atlas, bool flying) {
+void DebugUI::drawHud(const RayHit& hit, const BlockId* hotbarBlocks, int hotbarCount,
+                      int selected, const Atlas& atlas, bool flying) {
     if (!m_initialized) {
         return;
     }
@@ -174,7 +175,7 @@ void DebugUI::drawHud(const RayHit& hit, const int* hotbarBlocks, int hotbarCoun
         draw->AddRect(p0, p1, chosen ? IM_COL32(255, 255, 255, 255) : IM_COL32(90, 90, 90, 210),
                       5.0f, 0, chosen ? 2.0f : 1.0f);
 
-        const BlockId block = static_cast<BlockId>(hotbarBlocks[i]);
+        const BlockId block = hotbarBlocks[i];
         const glm::vec4 uv = atlas.tileUV(blockDef(block).tileSide);
         // OpenGL v=0 is the bottom of the atlas; ImGui's (0,0) is the top.
         draw->AddImage(texture, ImVec2(p0.x + 6.0f, p0.y + 6.0f), ImVec2(p1.x - 6.0f, p1.y - 6.0f),
@@ -185,7 +186,7 @@ void DebugUI::drawHud(const RayHit& hit, const int* hotbarBlocks, int hotbarCoun
     }
 
     if (selected >= 0 && selected < hotbarCount) {
-        const char* name = blockDef(static_cast<BlockId>(hotbarBlocks[selected])).name;
+        const char* name = blockDef(hotbarBlocks[selected]).name;
         const ImVec2 size = ImGui::CalcTextSize(name);
         draw->AddText(ImVec2((display.x - size.x) * 0.5f, y0 - 22.0f),
                       IM_COL32(255, 255, 255, 235), name);

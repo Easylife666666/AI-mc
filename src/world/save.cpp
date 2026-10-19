@@ -11,7 +11,8 @@ namespace aimc {
 namespace {
 
 constexpr char kMagic[4] = {'A', 'I', 'M', 'C'};
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;      // 2 adds the hotbar
+constexpr std::uint32_t kMinVersion = 1;
 constexpr std::uint32_t kMaxChunks = 1u << 20;
 constexpr std::uint32_t kMaxEdits = 1u << 16;
 
@@ -47,6 +48,10 @@ bool saveWorld(const std::string& path, const SaveData& data) {
     ok = ok && writePod(file, data.pitch);
     ok = ok && writePod(file, data.selected);
     ok = ok && writePod(file, data.timeOfDay);
+    for (const BlockId block : data.hotbar) {
+        const auto value = static_cast<std::uint8_t>(block);
+        ok = ok && writePod(file, value);
+    }
 
     const auto chunkCount = static_cast<std::uint32_t>(data.edits.size());
     ok = ok && writePod(file, chunkCount);
@@ -95,7 +100,7 @@ bool loadWorld(const std::string& path, SaveData& data) {
 
     std::uint32_t version = 0;
     ok = ok && readPod(file, version);
-    if (!ok || version != kVersion) {
+    if (!ok || version < kMinVersion || version > kVersion) {
         spdlog::error("unsupported save version {}: {}", version, path);
         gzclose(file);
         return false;
@@ -110,6 +115,15 @@ bool loadWorld(const std::string& path, SaveData& data) {
     ok = ok && readPod(file, loaded.pitch);
     ok = ok && readPod(file, loaded.selected);
     ok = ok && readPod(file, loaded.timeOfDay);
+    if (version >= 2) {
+        for (std::size_t i = 0; i < loaded.hotbar.size(); ++i) {
+            std::uint8_t block = 0;
+            ok = ok && readPod(file, block);
+            loaded.hotbar[i] =
+                block < static_cast<std::uint8_t>(BLOCK_COUNT) ? static_cast<BlockId>(block)
+                                                               : BLOCK_AIR;
+        }
+    }
 
     std::uint32_t chunkCount = 0;
     ok = ok && readPod(file, chunkCount);

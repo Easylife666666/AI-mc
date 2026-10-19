@@ -39,6 +39,7 @@ target_compile_features(imgui PUBLIC cxx_std_17)
 # ---- engine core (no window needed for logic tests) ----------------------
 add_library(aimc_core STATIC
   src/audio/audio.cpp
+  src/game/creative.cpp
   src/game/player.cpp
   src/game/settings.cpp
   src/game/raycast.cpp
@@ -56,6 +57,7 @@ add_library(aimc_core STATIC
   src/world/save.cpp
   src/world/terrain.cpp
   src/world/world.cpp
+  src/ui/creative_screen.cpp
   src/ui/debug_ui.cpp
 )
 target_include_directories(aimc_core PUBLIC

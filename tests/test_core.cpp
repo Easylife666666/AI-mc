@@ -1,14 +1,19 @@
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdint>
 #include <set>
 #include <thread>
 
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <zlib.h>
 
 #include <cstdio>
 
 #include "core/math.h"
+#include "game/creative.h"
 #include "game/player.h"
 #include "game/raycast.h"
 #include "render/atlas.h"
@@ -245,6 +250,8 @@ TEST(Save, RoundtripPreservesData) {
     data.pitch = -12.0f;
     data.selected = 6;
     data.timeOfDay = 0.625f;
+    data.hotbar[0] = BLOCK_SNOW;
+    data.hotbar[4] = BLOCK_BRICKS;
     data.edits[0x0000000100000002ull][123] = static_cast<std::uint8_t>(BLOCK_STONE);
 
     ASSERT_TRUE(saveWorld("aimc_test_save.aimc", data));
@@ -261,6 +268,7 @@ TEST(Save, RoundtripPreservesData) {
     EXPECT_FLOAT_EQ(loaded.pitch, -12.0f);
     EXPECT_EQ(loaded.selected, 6);
     EXPECT_FLOAT_EQ(loaded.timeOfDay, 0.625f);
+    EXPECT_EQ(loaded.hotbar, data.hotbar);
     ASSERT_EQ(loaded.edits.size(), 1u);
     ASSERT_EQ(loaded.edits.begin()->second.size(), 1u);
     EXPECT_EQ(loaded.edits.begin()->second.at(123), static_cast<std::uint8_t>(BLOCK_STONE));
@@ -410,6 +418,157 @@ TEST(World, EmptyWorldQueriesAreSafe) {
     EXPECT_EQ(world.getBlock(0, 0, 0), BLOCK_AIR);
     EXPECT_EQ(world.getBlock(10000, 0, 10000), BLOCK_AIR);
     EXPECT_FALSE(world.chunkReady(0, 0));
+}
+
+TEST(Creative, TabsContainOnlyPlaceableBlocks) {
+    const std::vector<BlockId>& all = creativeAllBlocks();
+    EXPECT_FALSE(all.empty());
+    for (const BlockId block : all) {
+        EXPECT_NE(block, BLOCK_AIR);
+        EXPECT_LT(block, BLOCK_COUNT);
+        EXPECT_TRUE(blockMatchesQuery(block, ""));
+    }
+
+    const std::vector<BlockId>& building = creativeTabItems(CreativeTab::Building);
+    EXPECT_NE(std::find(building.begin(), building.end(), BLOCK_STONE), building.end());
+    EXPECT_NE(std::find(building.begin(), building.end(), BLOCK_STONE_BRICKS),
+              building.end());
+
+    const std::vector<BlockId>& natural = creativeTabItems(CreativeTab::Natural);
+    EXPECT_NE(std::find(natural.begin(), natural.end(), BLOCK_GRASS), natural.end());
+    EXPECT_NE(std::find(natural.begin(), natural.end(), BLOCK_WATER), natural.end());
+}
+
+TEST(Creative, SearchMatchesNamesCaseInsensitively) {
+    const std::vector<BlockId> hits = creativeItems(CreativeTab::Search, "STONE");
+    EXPECT_NE(std::find(hits.begin(), hits.end(), BLOCK_STONE), hits.end());
+    EXPECT_NE(std::find(hits.begin(), hits.end(), BLOCK_STONE_BRICKS), hits.end());
+    EXPECT_EQ(std::find(hits.begin(), hits.end(), BLOCK_WATER), hits.end());
+
+    EXPECT_EQ(creativeItems(CreativeTab::Search, "").size(), creativeAllBlocks().size());
+    EXPECT_TRUE(creativeItems(CreativeTab::Search, "zzz").empty());
+}
+
+TEST(Creative, ScrollRowsClampToContent) {
+    EXPECT_EQ(creativeRowCount(0, 9), 0);
+    EXPECT_EQ(creativeRowCount(9, 9), 1);
+    EXPECT_EQ(creativeRowCount(10, 9), 2);
+    EXPECT_EQ(creativeMaxScrollRow(10, 9, 5), 0);
+    EXPECT_EQ(creativeMaxScrollRow(100, 9, 5), 7);  // 12 rows - 5 visible
+    EXPECT_EQ(creativeMaxScrollRow(0, 9, 5), 0);
+}
+
+TEST(Creative, HotbarFillsFirstEmptySlot) {
+    std::array<BlockId, kHotbarSlots> bar = defaultHotbar();
+    EXPECT_EQ(bar.size(), static_cast<std::size_t>(kHotbarSlots));
+    EXPECT_EQ(firstEmptyHotbarSlot(bar), -1);
+    EXPECT_EQ(putInHotbar(bar, BLOCK_SNOW), -1);
+
+    bar[3] = BLOCK_AIR;
+    EXPECT_EQ(firstEmptyHotbarSlot(bar), 3);
+    EXPECT_EQ(putInHotbar(bar, BLOCK_STONE_BRICKS), 3);
+    EXPECT_EQ(bar[3], BLOCK_STONE_BRICKS);
+
+    bar[0] = BLOCK_AIR;
+    EXPECT_EQ(putInHotbar(bar, BLOCK_BRICKS), 0);
+    EXPECT_EQ(bar[0], BLOCK_BRICKS);
+}
+
+TEST(Save, LoadsVersion1WithoutHotbar) {
+    const char* path = "aimc_test_save_v1.aimc";
+    gzFile file = gzopen(path, "wb6");
+    ASSERT_NE(file, nullptr);
+
+    const char magic[4] = {'A', 'I', 'M', 'C'};
+    const std::uint32_t version = 1;
+    const std::int32_t seed = 777;
+    const float pose[5] = {1.0f, 2.0f, 3.0f, 45.0f, -10.0f};
+    const std::int32_t selected = 2;
+    const float time = 0.5f;
+    const std::uint32_t chunks = 0;
+    ASSERT_EQ(gzwrite(file, magic, 4), 4);
+    ASSERT_EQ(gzwrite(file, &version, 4), 4);
+    ASSERT_EQ(gzwrite(file, &seed, 4), 4);
+    ASSERT_EQ(gzwrite(file, pose, static_cast<unsigned int>(sizeof(pose))),
+              static_cast<int>(sizeof(pose)));
+    ASSERT_EQ(gzwrite(file, &selected, 4), 4);
+    ASSERT_EQ(gzwrite(file, &time, 4), 4);
+    ASSERT_EQ(gzwrite(file, &chunks, 4), 4);
+    ASSERT_EQ(gzclose(file), Z_OK);
+
+    SaveData loaded;
+    ASSERT_TRUE(loadWorld(path, loaded));
+    std::remove(path);
+
+    EXPECT_EQ(loaded.seed, 777);
+    EXPECT_EQ(loaded.selected, 2);
+    EXPECT_FLOAT_EQ(loaded.timeOfDay, 0.5f);
+    EXPECT_EQ(loaded.hotbar, defaultHotbar());
+    EXPECT_TRUE(loaded.edits.empty());
+}
+
+TEST(Save, RejectsNewerVersion) {
+    const char* path = "aimc_test_save_v9.aimc";
+    gzFile file = gzopen(path, "wb6");
+    ASSERT_NE(file, nullptr);
+    const char magic[4] = {'A', 'I', 'M', 'C'};
+    const std::uint32_t version = 9;
+    ASSERT_EQ(gzwrite(file, magic, 4), 4);
+    ASSERT_EQ(gzwrite(file, &version, 4), 4);
+    ASSERT_EQ(gzclose(file), Z_OK);
+
+    SaveData loaded;
+    EXPECT_FALSE(loadWorld(path, loaded));
+    std::remove(path);
+}
+
+TEST(Creative, CursorStacksFollowVanillaRules) {
+    ItemStack cursor;
+    takeItem(cursor, BLOCK_STONE);
+    EXPECT_EQ(cursor.block, BLOCK_STONE);
+    EXPECT_EQ(cursor.count, 1);
+
+    takeItem(cursor, BLOCK_STONE);
+    EXPECT_EQ(cursor.count, 2);
+    for (int i = 0; i < 200; ++i) {
+        takeItem(cursor, BLOCK_STONE);
+    }
+    EXPECT_EQ(cursor.count, kMaxStack);
+
+    takeItem(cursor, BLOCK_DIRT);
+    EXPECT_EQ(cursor.block, BLOCK_DIRT);
+    EXPECT_EQ(cursor.count, 1);
+
+    takeOneItem(cursor, BLOCK_DIRT);
+    EXPECT_TRUE(cursor.empty());
+    takeOneItem(cursor, BLOCK_SAND);
+    EXPECT_EQ(cursor.block, BLOCK_SAND);
+    EXPECT_EQ(cursor.count, 1);
+}
+
+TEST(Creative, HotbarClicksPlaceAndPickUp) {
+    std::array<BlockId, kHotbarSlots> bar = defaultHotbar();
+    ItemStack cursor;
+    takeItem(cursor, BLOCK_SNOW);
+
+    clickHotbarSlot(bar, cursor, 2);  // occupied: swap the held stack with the slot
+    EXPECT_EQ(bar[2], BLOCK_SNOW);
+    EXPECT_EQ(cursor.block, BLOCK_STONE);
+    EXPECT_EQ(cursor.count, kMaxStack);
+
+    clickHotbarSlot(bar, cursor, 4);
+    EXPECT_EQ(bar[4], BLOCK_STONE);
+    EXPECT_EQ(cursor.block, BLOCK_LOG);
+
+    cursor.clear();
+    clickHotbarSlot(bar, cursor, 0);  // empty cursor: pick the slot up
+    EXPECT_EQ(cursor.block, BLOCK_GRASS);
+    EXPECT_EQ(bar[0], BLOCK_AIR);
+    EXPECT_EQ(cursor.count, kMaxStack);
+
+    clickHotbarSlot(bar, cursor, 0);  // put it back
+    EXPECT_TRUE(cursor.empty());
+    EXPECT_EQ(bar[0], BLOCK_GRASS);
 }
 
 }  // namespace

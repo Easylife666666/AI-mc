@@ -14,6 +14,7 @@
 
 #include "audio/audio.h"
 #include "core/log.h"
+#include "game/creative.h"
 #include "game/player.h"
 #include "game/raycast.h"
 #include "game/settings.h"
@@ -25,6 +26,7 @@
 #include "render/selection.h"
 #include "render/shader.h"
 #include "render/sky.h"
+#include "ui/creative_screen.h"
 #include "ui/debug_ui.h"
 #include "world/block.h"
 #include "world/chunk.h"
@@ -102,6 +104,8 @@ struct Options {
     float benchmark = 0.0f;
     float quitAfter = 0.0f;
     bool panel = false;
+    bool inventory = false;
+    std::string tab;
     std::string shot;
     std::string savePath = "save.aimc";
     std::string loadPath;
@@ -136,6 +140,8 @@ void printUsage(const char* argv0) {
         "  --benchmark N      run N seconds, print average fps, then exit\n"
         "  --quit-after N     quit cleanly after N seconds (used for tests)\n"
         "  --panel            show the debug panel in screenshot mode\n"
+        "  --inventory        open the creative inventory (screenshot/demo mode)\n"
+        "  --tab NAME         creative tab: building, natural or search\n"
         "  --hidden           create a hidden window\n"
         "  --no-vsync         disable vsync\n"
         "  --no-hud           hide crosshair and hotbar\n"
@@ -144,7 +150,7 @@ void printUsage(const char* argv0) {
         "  --help             this text\n"
         "\n"
         "controls: WASD move, Space jump, double-tap W to sprint, F fly,\n"
-        "          Shift boosts flight, Ctrl down (fly),\n"
+        "          Shift boosts flight, Ctrl down (fly), E creative inventory,\n"
         "          LMB break, RMB place, 1-9/wheel select, F1 panel, F5 save,\n"
         "          F9 load, M mute, Esc quit\n",
         argv0);
@@ -203,6 +209,11 @@ Options parseArgs(int argc, char** argv) {
             opt.quitAfter = std::stof(nextValue());
         } else if (arg == "--panel") {
             opt.panel = true;
+        } else if (arg == "--inventory") {
+            opt.inventory = true;
+        } else if (arg == "--tab") {
+            opt.tab = nextValue();
+            opt.inventory = true;
         } else if (arg == "--hidden") {
             opt.hidden = true;
         } else if (arg == "--no-vsync") {
@@ -339,6 +350,8 @@ int main(int argc, char** argv) {
 
     aimc::Camera camera;
     aimc::Player player;
+    aimc::CreativeScreen creative;
+    std::array<aimc::BlockId, aimc::kHotbarSlots> hotbar = aimc::defaultHotbar();
     int selected = 0;
     float timeOfDay = opt.timeOfDay;
 
@@ -348,7 +361,8 @@ int main(int argc, char** argv) {
         camera.pos = player.eyePosition();
         camera.yawDeg = saveData.yaw;
         camera.pitchDeg = saveData.pitch;
-        selected = std::clamp(saveData.selected, 0, 8);
+        selected = std::clamp(saveData.selected, 0, aimc::kHotbarSlots - 1);
+        hotbar = saveData.hotbar;
         timeOfDay = saveData.timeOfDay;
     } else {
         camera.pos = glm::vec3(0.5f, 70.0f, 0.5f);
@@ -382,18 +396,27 @@ int main(int argc, char** argv) {
     }
 
     const bool interactive = opt.shot.empty();
+    if (opt.inventory) {
+        creative.setOpen(true);
+        if (ui.visible()) {
+            ui.toggle();
+        }
+    }
+    if (opt.tab == "natural") {
+        creative.setTab(aimc::CreativeTab::Natural);
+    } else if (opt.tab == "search") {
+        creative.setTab(aimc::CreativeTab::Search);
+    } else if (opt.tab == "building") {
+        creative.setTab(aimc::CreativeTab::Building);
+    } else if (!opt.tab.empty()) {
+        spdlog::warn("unknown --tab '{}', expected building, natural or search", opt.tab);
+    }
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
-
-    std::array<int, 9> hotbar = {
-        aimc::BLOCK_GRASS,  aimc::BLOCK_DIRT,   aimc::BLOCK_STONE,
-        aimc::BLOCK_SAND,   aimc::BLOCK_LOG,    aimc::BLOCK_LEAVES,
-        aimc::BLOCK_PLANKS, aimc::BLOCK_COBBLE, aimc::BLOCK_WATER,
-    };
 
     std::string status =
         loaded ? "loaded " + savePath : "new world, seed " + std::to_string(world.seed());
@@ -422,6 +445,7 @@ int main(int argc, char** argv) {
         data.pitch = camera.pitchDeg;
         data.selected = selected;
         data.timeOfDay = timeOfDay;
+        data.hotbar = hotbar;
         data.edits = world.snapshotEdits();
         return aimc::saveWorld(path, data);
     };
@@ -436,7 +460,8 @@ int main(int argc, char** argv) {
         camera.pos = player.eyePosition();
         camera.yawDeg = data.yaw;
         camera.pitchDeg = data.pitch;
-        selected = std::clamp(data.selected, 0, 8);
+        selected = std::clamp(data.selected, 0, aimc::kHotbarSlots - 1);
+        hotbar = data.hotbar;
         timeOfDay = data.timeOfDay;
         world.prewarm(camera.pos, settings.viewDistance, 30000);
         return true;
@@ -454,6 +479,7 @@ int main(int argc, char** argv) {
         camera.pos = player.eyePosition();
         camera.yawDeg = -90.0f;
         camera.pitchDeg = -18.0f;
+        hotbar = aimc::defaultHotbar();
         selected = 0;
         timeOfDay = 0.42f;
     };
@@ -481,20 +507,32 @@ int main(int argc, char** argv) {
             if (event.type == SDL_KEYDOWN && event.key.repeat == 0) {
                 const SDL_Keycode key = event.key.keysym.sym;
                 if (key == SDLK_ESCAPE) {
-                    if (ui.visible()) {
+                    if (creative.open()) {
+                        creative.close();
+                    } else if (ui.visible()) {
                         ui.toggle();
                     } else {
                         running = false;
                     }
                 } else if (key == SDLK_F1) {
-                    ui.toggle();
+                    if (!creative.open()) {
+                        ui.toggle();
+                    }
+                } else if (key == SDLK_e && interactive) {
+                    if (creative.open()) {
+                        if (!creative.capturesText()) {
+                            creative.close();
+                        }
+                    } else if (!ui.visible()) {
+                        creative.setOpen(true);
+                    }
                 } else if (key == SDLK_F5) {
                     requestSave = true;
                 } else if (key == SDLK_F9) {
                     requestLoad = true;
-                } else if (key == SDLK_f && interactive) {
+                } else if (key == SDLK_f && interactive && !creative.open()) {
                     player.toggleFlying();
-                } else if (key == SDLK_m) {
+                } else if (key == SDLK_m && !creative.open()) {
                     muted = !muted;
                 } else if (key == SDLK_w) {
                     const Uint64 nowMs = SDL_GetTicks64();
@@ -502,7 +540,7 @@ int main(int argc, char** argv) {
                         sprinting = true;
                     }
                     lastWTapMs = nowMs;
-                } else if (key >= SDLK_1 && key <= SDLK_9) {
+                } else if (key >= SDLK_1 && key <= SDLK_9 && !creative.open()) {
                     selected = key - SDLK_1;
                 }
             }
@@ -513,11 +551,13 @@ int main(int argc, char** argv) {
                 event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                 sprinting = false;
             }
-            if (event.type == SDL_MOUSEWHEEL && interactive && !ui.visible()) {
+            if (event.type == SDL_MOUSEWHEEL && interactive && !ui.visible() &&
+                !creative.open()) {
                 selected = (selected - event.wheel.y + static_cast<int>(hotbar.size())) %
                            static_cast<int>(hotbar.size());
             }
-            if (event.type == SDL_MOUSEBUTTONDOWN && interactive && !ui.visible()) {
+            if (event.type == SDL_MOUSEBUTTONDOWN && interactive && !ui.visible() &&
+                !creative.open()) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     clickBreak = true;
                 } else if (event.button.button == SDL_BUTTON_RIGHT) {
@@ -528,7 +568,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        const bool wantCapture = interactive && !ui.visible();
+        const bool wantCapture = interactive && !ui.visible() && !creative.open();
         if (wantCapture != mouseCaptured) {
             window.setRelativeMouse(wantCapture);
             mouseCaptured = wantCapture;
@@ -539,7 +579,7 @@ int main(int argc, char** argv) {
 
         sprintActive = false;
 
-        if (interactive && !ui.visible()) {
+        if (interactive && !ui.visible() && !creative.open()) {
             aimc::PlayerInput input;
             const Uint8* keys = SDL_GetKeyboardState(nullptr);
             input.forward = keys[SDL_SCANCODE_W] != 0;
@@ -632,13 +672,13 @@ int main(int argc, char** argv) {
         const aimc::RayHit hit =
             aimc::raycastVoxel(blockGetter, camera.pos, camera.forward(), 6.0f);
 
-        if (interactive && !ui.visible()) {
+        if (interactive && !ui.visible() && !creative.open()) {
             if (clickBreak && hit.hit) {
                 if (world.setBlock(hit.block.x, hit.block.y, hit.block.z, aimc::BLOCK_AIR)) {
                     audio.play(aimc::Audio::Sound::Break, 0.8f);
                 }
             }
-            if (clickPlace && hit.hit) {
+            if (clickPlace && hit.hit && hotbar[selected] != aimc::BLOCK_AIR) {
                 const glm::ivec3 target = hit.block + hit.normal;
                 const aimc::BlockId existing = world.getBlock(target.x, target.y, target.z);
                 if (existing == aimc::BLOCK_AIR || existing == aimc::BLOCK_WATER) {
@@ -652,16 +692,15 @@ int main(int argc, char** argv) {
                         static_cast<float>(target.z) < pmax.z &&
                         static_cast<float>(target.z + 1) > pmin.z;
                     if (!overlaps) {
-                        if (world.setBlock(target.x, target.y, target.z,
-                                           static_cast<aimc::BlockId>(hotbar[selected]))) {
+                        if (world.setBlock(target.x, target.y, target.z, hotbar[selected])) {
                             audio.play(aimc::Audio::Sound::Place, 0.7f);
                         }
                     }
                 }
             }
             if (clickPick && hit.hit) {
-                const int picked =
-                    static_cast<int>(world.getBlock(hit.block.x, hit.block.y, hit.block.z));
+                const aimc::BlockId picked =
+                    world.getBlock(hit.block.x, hit.block.y, hit.block.z);
                 const auto it = std::find(hotbar.begin(), hotbar.end(), picked);
                 if (it != hotbar.end()) {
                     selected = static_cast<int>(it - hotbar.begin());
@@ -746,10 +785,12 @@ int main(int argc, char** argv) {
         const float uiDt = opt.shot.empty() ? dt : (1.0f / 60.0f);
         const aimc::UiActions actions =
             ui.draw(camera, world, stats, uiDt, settings, timeOfDay, status);
-        if (settings.hud) {
+        const bool creativeOpen = creative.open();
+        if (settings.hud && !creativeOpen) {
             ui.drawHud(hit, hotbar.data(), static_cast<int>(hotbar.size()), selected, atlas,
                        player.flying());
         }
+        creative.draw(atlas, hotbar, selected, interactive);
         ui.endFrame();
 
         if (actions.saveWorld) {

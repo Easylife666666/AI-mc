@@ -1,9 +1,6 @@
 # AI-mc
 
 > [!NOTE]
-> 暂时停止开发。
-
-> [!NOTE]
 > 本项目由 **DeepSeek-V4.1-Flash** 模型与 **DeepSeek Harness** 智能体协作完成。
 > Built with the **DeepSeek-V4.1-Flash** model and the **DeepSeek Harness** agent.
 
@@ -11,8 +8,8 @@
 窗口/输入用 SDL2，调试面板用 Dear ImGui，地形用 FastNoiseLite，音频用 miniaudio，
 存档压缩用 zlib。
 
-**M0–M5 全部完成**：流式世界、多线程网格构建、玩家物理、破坏/放置、AO、昼夜、音效、
-存档与设置面板。
+**M0–M6 全部完成**：流式世界、多线程网格构建、玩家物理、破坏/放置、AO、昼夜、音效、
+存档与设置面板、创造模式物品栏。
 
 ![M2 vista](docs/m2.png)
 
@@ -25,6 +22,9 @@
 - **地形**：OpenSimplex2 + 4 层 fBm，海平面/沙滩/草地/水体，跨区块确定性树木
 - **玩法**：AABB 玩家物理（重力/跳跃/游泳/创造飞行/双击 W 奔跑）、DDA 射线拾取、
   破坏/放置/取色、选中描边、9 格热键栏
+- **创造物品栏**（`E`）：仿原版的分类标签 + 9×5 物品网格 + 滚动条 + 搜索框 + 快捷栏行 +
+  销毁槽；方块以等轴 3D 图标显示，单击拿起、Shift+单击整组入栏、`1`–`9` 直接放入快捷栏
+- **方块**：草、土、石、沙、原木、树叶、木板、圆石、水、砂砾、石砖、红砖、雪块
 - **时间**：昼夜循环、日落暖色、夜间星空与全局光照衰减
 - **音频**：程序化合成的脚步/破坏/放置/跳跃/落地点击声（miniaudio 3D 无关，纯 2D 混音）
 - **存档**：zlib 压缩的二进制格式，只保存玩家编辑 diff + 玩家状态，`F5`/`F9`/退出自动存档
@@ -36,6 +36,7 @@
 |---|---|
 | ![M3](docs/m3.png) **M3** 破坏/放置 · 选中描边 · 热键栏 | ![M4](docs/m4.png) **M4** 日落天空 |
 | ![M5](docs/m5.png) **M5** 设置面板 + HUD | ![M1](docs/m1.png) **M1** 最早的原型 |
+| ![M6](docs/m6.png) **M6** 创造模式物品栏 · 分类 / 搜索 / 快捷栏 | |
 
 ## 依赖
 
@@ -71,6 +72,7 @@ cmake --build build -j$(nproc)
 | 鼠标 | 视角 |
 | 左键 / 右键 / 中键 | 破坏 / 放置 / 取色选块 |
 | `1`–`9` / 滚轮 | 选择方块 |
+| `E` | 打开/关闭创造模式物品栏 |
 | `F1` | 打开/关闭设置面板（打开时释放鼠标） |
 | `F5` / `F9` | 快速存档 / 读档 |
 | `M` | 静音 |
@@ -87,6 +89,7 @@ cmake --build build -j$(nproc)
 --time T --day-length N   时间 0..1 / 一天秒数（0 冻结）
 --benchmark N             跑 N 秒输出平均帧率
 --shot PATH --hidden      无头截图
+--inventory --tab NAME    截图时打开物品栏（building / natural / search）
 --no-vsync --no-hud --no-audio --verbose
 ```
 
@@ -96,18 +99,19 @@ cmake --build build -j$(nproc)
 ctest --test-dir build --output-on-failure
 ```
 
-19 个用例覆盖：区块索引、负数坐标除法、地形确定性与高度范围、树木生成、面剔除/AO 网格、
-水独立缓冲、图集 UV、视锥剔除、DDA 射线、流式生成 + 方块编辑、存档与设置往返。
+29 个用例覆盖：区块索引、负数坐标除法、地形确定性与高度范围、树木生成、面剔除/AO 网格、
+水独立缓冲、图集 UV、视锥剔除、DDA 射线、流式生成 + 方块编辑、存档（含 v1 兼容）与设置往返、
+物品栏分类/搜索/滚动边界/热键栏放置与光标堆叠规则、出水入水跳跃判定。
 
 ## 架构
 
 ```
 src/audio      miniaudio 设备 + 程序化音效合成
 src/core       数学工具 / 日志
-src/game       Player（AABB 物理）、DDA 射线、Settings
+src/game       Player（AABB 物理）、DDA 射线、Settings、Creative（物品栏数据规则）
 src/platform   SDL2 窗口 / GL 上下文 / 全屏 / VSync
 src/render     Atlas、ChunkMesh（AO）、Frustum、SelectionBox、Shader、Sky、Screenshot
-src/ui         ImGui 调试面板 + HUD（准星/热键栏）
+src/ui         ImGui 调试面板、HUD（准星/热键栏）、创造物品栏界面
 src/world      Block、Chunk、Terrain、World（流式 + 线程）、Save（zlib）
 ```
 
@@ -121,8 +125,9 @@ src/world      Block、Chunk、Terrain、World（流式 + 线程）、Save（zli
 
 ### 存档格式
 
-`AIMC` + version + seed + 玩家位置/朝向 + 时间 + 选中格 + 每区块编辑项，
-整体用 zlib（`gzFile`）压缩。地形由 seed 确定性重建，因此只需保存差异。
+`AIMC` + version + seed + 玩家位置/朝向 + 时间 + 选中格 + 快捷栏（v2 新增）+
+每区块编辑项，整体用 zlib（`gzFile`）压缩。地形由 seed 确定性重建，因此只需保存差异。
+读取端兼容 v1（没有快捷栏，回落到默认栏）。
 
 ## 性能
 
@@ -152,7 +157,8 @@ src/world      Block、Chunk、Terrain、World（流式 + 线程）、Save（zli
 - [x] M3 玩家物理 / 碰撞 / DDA / 破坏放置 / 高亮 / 热键栏
 - [x] M4 天空昼夜 + 星空 + 程序化音效
 - [x] M5 zlib 存档 + 设置面板 + 自适应视距
-- [ ] 下一步候选：生物群系与洞穴、方块光照传播、LOD、彩色光照、存档版本迁移
+- [x] M6 创造模式物品栏（分类、搜索、滚动、快捷栏交互）+ 4 种新建筑方块
+- [ ] 下一步候选：生物群系与洞穴、方块光照传播、LOD、彩色光照、更多方块与物品
 
 ## 许可证
 

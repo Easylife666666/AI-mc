@@ -127,6 +127,30 @@ glm::vec3 tileColor(int tile, int x, int y) {
     case 11:  // gravel
         return mixv({0.36f, 0.33f, 0.31f}, {0.60f, 0.57f, 0.54f},
                     valueNoise(u * 8.0f, v * 8.0f, 141));
+    case 12: {  // stone bricks: running bond, darker mortar
+        const int row = y / 8;
+        const int shift = (row % 2) * 4;
+        const glm::vec3 stone = mixv({0.44f, 0.44f, 0.46f}, {0.64f, 0.64f, 0.66f},
+                                     valueNoise(u * 6.0f, v * 6.0f, 151));
+        const bool mortar = (y % 8 == 7) || ((x + shift) % 8 == 7);
+        return mortar ? stone * 0.62f : stone;
+    }
+    case 13: {  // bricks: running bond, pale mortar
+        const int row = y / 4;
+        const int shift = (row % 2) * 4;
+        const glm::vec3 clay = mixv({0.52f, 0.24f, 0.18f}, {0.74f, 0.38f, 0.29f},
+                                    valueNoise(u * 7.0f, v * 7.0f, 161));
+        const bool mortar = (y % 4 == 3) || ((y % 4 != 3) && ((x + shift) % 8 == 7));
+        return mortar ? glm::vec3(0.63f, 0.61f, 0.57f) : clay;
+    }
+    case 14: {  // snow block: almost white with a faint blue cast
+        glm::vec3 c = mixv({0.86f, 0.90f, 0.96f}, {0.98f, 0.99f, 1.0f},
+                           valueNoise(u * 6.0f, v * 6.0f, 171));
+        if (hash01(x, y, 172) < 0.06f) {
+            c *= 0.94f;
+        }
+        return c;
+    }
     default:
         return glm::vec3(1.0f, 0.0f, 1.0f);  // debug magenta
     }
