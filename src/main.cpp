@@ -842,14 +842,23 @@ int main(int argc, char** argv) {
 
         world.update(camera.pos, settings.viewDistance, true);
 
-        const auto blockGetter = [&world](int x, int y, int z) -> aimc::BlockId {
+        const int cameraBlockX = static_cast<int>(std::floor(camera.pos.x));
+        const int cameraBlockY = static_cast<int>(std::floor(camera.pos.y));
+        const int cameraBlockZ = static_cast<int>(std::floor(camera.pos.z));
+        const auto blockGetter = [&world, cameraBlockX, cameraBlockY,
+                                  cameraBlockZ](int x, int y, int z) -> aimc::BlockId {
             const aimc::BlockId block = world.getBlock(x, y, z);
+            if (aimc::isPortalBlock(block)) {
+                // While standing in a portal, don't let its block eat the ray at
+                // distance zero; every other portal block is targetable.
+                if (x == cameraBlockX && y == cameraBlockY && z == cameraBlockZ) {
+                    return aimc::BLOCK_AIR;
+                }
+                return block;
+            }
             // Flowing fluid is see-through for targeting; sources stay
             // clickable so the player can remove them.
-            const bool passThrough = aimc::isFluidFlow(block) ||
-                                     block == aimc::BLOCK_PORTAL_X ||
-                                     block == aimc::BLOCK_PORTAL_Z;
-            return passThrough ? aimc::BLOCK_AIR : block;
+            return aimc::isFluidFlow(block) ? aimc::BLOCK_AIR : block;
         };
         const aimc::RayHit hit =
             aimc::raycastVoxel(blockGetter, camera.pos, camera.forward(), 6.0f);
@@ -876,7 +885,9 @@ int main(int argc, char** argv) {
             } else if (clickPlace && hit.hit && !held.empty()) {
                 const glm::ivec3 target = hit.block + hit.normal;
                 const aimc::BlockId existing = world.getBlock(target.x, target.y, target.z);
-                if (existing == aimc::BLOCK_AIR || aimc::isLiquid(existing)) {
+                if (aimc::isPortalBlock(held.block)) {
+                    status = "portal blocks cannot be placed";
+                } else if (existing == aimc::BLOCK_AIR || aimc::isLiquid(existing)) {
                     const glm::vec3 pmin = player.position() - glm::vec3(0.3f, 0.0f, 0.3f);
                     const glm::vec3 pmax = player.position() + glm::vec3(0.3f, 1.8f, 0.3f);
                     const bool overlaps =
@@ -898,13 +909,16 @@ int main(int argc, char** argv) {
                 }
             }
             if (clickPick && hit.hit) {
-                const aimc::ItemRef picked = aimc::ItemRef::ofBlock(
-                    world.getBlock(hit.block.x, hit.block.y, hit.block.z));
-                const auto it = std::find(hotbar.begin(), hotbar.end(), picked);
-                if (it != hotbar.end()) {
-                    selected = static_cast<int>(it - hotbar.begin());
-                } else {
-                    hotbar[selected] = picked;
+                const aimc::BlockId pickedBlock =
+                    world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+                if (!aimc::isPortalBlock(pickedBlock)) {
+                    const aimc::ItemRef picked = aimc::ItemRef::ofBlock(pickedBlock);
+                    const auto it = std::find(hotbar.begin(), hotbar.end(), picked);
+                    if (it != hotbar.end()) {
+                        selected = static_cast<int>(it - hotbar.begin());
+                    } else {
+                        hotbar[selected] = picked;
+                    }
                 }
             }
         }

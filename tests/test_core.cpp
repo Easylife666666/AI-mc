@@ -248,6 +248,15 @@ TEST(Raycast, VerticalHitNormal) {
     EXPECT_EQ(hit.normal, glm::ivec3(0, 1, 0));
 }
 
+TEST(Raycast, PortalBlocksStopTheRay) {
+    const auto get = [](int x, int y, int z) -> BlockId {
+        return (x == 2 && y == 0 && z == 0) ? BLOCK_PORTAL_Z : BLOCK_AIR;
+    };
+    const RayHit hit = raycastVoxel(get, glm::vec3(0.5f), glm::vec3(1.0f, 0.0f, 0.0f), 5.0f);
+    EXPECT_TRUE(hit.hit);
+    EXPECT_EQ(hit.block, glm::ivec3(2, 0, 0));
+}
+
 TEST(Save, RoundtripPreservesData) {
     SaveData data;
     data.seed = 4242;
@@ -904,6 +913,47 @@ TEST(Portal, LightsInARealWorld) {
     EXPECT_EQ(world.getBlock(1, y0 + 1, z), BLOCK_PORTAL_Z);
     EXPECT_EQ(world.getBlock(2, y0 + 3, z), BLOCK_PORTAL_Z);
     EXPECT_EQ(world.getBlock(0, y0, z), BLOCK_OBSIDIAN);
+}
+
+TEST(Portal, BreakingOneBlockLeavesResidualPortal) {
+    Atlas atlas;
+    World world;
+    world.init(8);
+    world.setAtlas(&atlas);
+    world.update(glm::vec3(0.5f, 64.0f, 0.5f), 1, false);
+    for (int i = 0; i < 400 && world.getBlock(0, 0, 0) == BLOCK_AIR; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_NE(world.getBlock(0, 0, 0), BLOCK_AIR);
+
+    const int surface = world.surfaceY(0, 0);
+    ASSERT_GE(surface, 0);
+    const int y0 = std::min(surface + 2, Chunk::SY - 6);
+    const int z = 0;
+    for (int x = 0; x <= 3; ++x) {
+        ASSERT_TRUE(world.setBlock(x, y0, z, BLOCK_OBSIDIAN));
+        ASSERT_TRUE(world.setBlock(x, y0 + 4, z, BLOCK_OBSIDIAN));
+    }
+    for (int y = y0 + 1; y <= y0 + 3; ++y) {
+        ASSERT_TRUE(world.setBlock(0, y, z, BLOCK_OBSIDIAN));
+        ASSERT_TRUE(world.setBlock(3, y, z, BLOCK_OBSIDIAN));
+    }
+    for (int x = 1; x <= 2; ++x) {
+        for (int y = y0 + 1; y <= y0 + 3; ++y) {
+            (void)world.setBlock(x, y, z, BLOCK_AIR);
+        }
+    }
+    ASSERT_TRUE(lightPortal(world, glm::ivec3(1, y0 + 1, z)));
+
+    ASSERT_TRUE(world.setBlock(1, y0 + 1, z, BLOCK_AIR));
+    EXPECT_EQ(world.getBlock(1, y0 + 1, z), BLOCK_AIR);
+    EXPECT_EQ(world.getBlock(2, y0 + 1, z), BLOCK_PORTAL_Z);
+    EXPECT_EQ(world.getBlock(1, y0 + 2, z), BLOCK_PORTAL_Z);
+    EXPECT_EQ(world.getBlock(0, y0 + 1, z), BLOCK_OBSIDIAN);
+
+    glm::ivec3 found{};
+    ASSERT_TRUE(findPortalNear(world, glm::ivec3(1, y0 + 1, z), 2, found));
+    EXPECT_TRUE(isPortalBlock(world.getBlock(found.x, found.y, found.z)));
 }
 
 TEST(Dimension, ScalesCoordinates) {
