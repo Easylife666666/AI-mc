@@ -267,6 +267,10 @@ void FluidSim::wakeChunk(World& world, const Chunk& chunk) {
         for (int z = 0; z < Chunk::SZ; ++z) {
             for (int x = 0; x < Chunk::SX; ++x) {
                 const BlockId block = static_cast<BlockId>(chunk.get(x, y, z));
+                if (block == BLOCK_FIRE) {
+                    world.scheduleFire(origin.x + x, y, origin.z + z);
+                    continue;
+                }
                 if (!isLiquid(block)) {
                     continue;
                 }

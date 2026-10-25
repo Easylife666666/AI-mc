@@ -47,6 +47,7 @@ const BlockDef kDefs[BLOCK_COUNT] = {
     {"Flowing Lava",    23,  23,   23,  false, false},
     {"Flowing Lava",    23,  23,   23,  false, false},
     {"Falling Lava",    23,  23,   23,  false, false},
+    {"Fire",            25,  25,   25,  false, false},
 };
 
 }  // namespace

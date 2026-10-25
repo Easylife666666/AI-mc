@@ -243,6 +243,47 @@ void emitFluidBlock(const Chunk& chunk, const World& world, MeshData& mesh, int 
     }
 }
 
+
+void emitFireQuad(const Chunk& chunk, MeshData& mesh, int x, int y, int z,
+                  const std::array<glm::vec3, 4>& corners, const glm::vec4& uvRect) {
+    const glm::ivec3 origin = chunk.origin();
+    const float u[4] = {0.0f, 1.0f, 1.0f, 0.0f};
+    const float v[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
+    for (int c = 0; c < 4; ++c) {
+        Vertex vertex{};
+        vertex.pos[0] = static_cast<float>(origin.x + x) + corners[c].x;
+        vertex.pos[1] = static_cast<float>(origin.y + y) + corners[c].y;
+        vertex.pos[2] = static_cast<float>(origin.z + z) + corners[c].z;
+        vertex.uv[0] = lerp(uvRect.x, uvRect.z, u[c]);
+        vertex.uv[1] = lerp(uvRect.y, uvRect.w, v[c]);
+        vertex.light = 1.0f;
+        mesh.vertices.push_back(vertex);
+    }
+    mesh.indices.push_back(base + 0);
+    mesh.indices.push_back(base + 1);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 0);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 3);
+}
+
+// Two crossed translucent planes, like vanilla fire, emitted into the emissive
+// portal buffer so it keeps glowing at night.
+void emitFireQuads(const Chunk& chunk, MeshData& mesh, int x, int y, int z,
+                   const glm::vec4& uvRect) {
+    const std::array<glm::vec3, 4> planeX = {{{0.5f, 0.0f, 0.0f},
+                                              {0.5f, 0.0f, 1.0f},
+                                              {0.5f, 1.0f, 1.0f},
+                                              {0.5f, 1.0f, 0.0f}}};
+    const std::array<glm::vec3, 4> planeZ = {{{0.0f, 0.0f, 0.5f},
+                                              {1.0f, 0.0f, 0.5f},
+                                              {1.0f, 1.0f, 0.5f},
+                                              {0.0f, 1.0f, 0.5f}}};
+    emitFireQuad(chunk, mesh, x, y, z, planeX, uvRect);
+    emitFireQuad(chunk, mesh, x, y, z, planeZ, uvRect);
+}
+
 }  // namespace
 
 void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
@@ -269,6 +310,10 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
                 if (block == BLOCK_PORTAL_X || block == BLOCK_PORTAL_Z) {
                     emitPortalQuad(chunk, out.portal, x, y, z, block == BLOCK_PORTAL_Z,
                                    atlas.tileUV(def.tileSide));
+                    continue;
+                }
+                if (block == BLOCK_FIRE) {
+                    emitFireQuads(chunk, out.portal, x, y, z, atlas.tileUV(def.tileSide));
                     continue;
                 }
                 if (isWater(block) || isLava(block)) {

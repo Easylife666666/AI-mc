@@ -48,6 +48,8 @@ enum BlockId : std::uint8_t {
     BLOCK_LAVA_FLOW_7,
     BLOCK_LAVA_FALLING,
 
+    BLOCK_FIRE,
+
     BLOCK_COUNT
 };
 

@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <tbb/concurrent_queue.h>
@@ -62,6 +63,11 @@ public:
     // Runs one 20 Hz fluid simulation step (main thread).
     void tickFluids();
 
+    // Fire lifetimes: placeFire() schedules a burn-out, tickFire() is called at
+    // 20 Hz and extinguishes fire that burns out, loses its floor, or touches water.
+    void scheduleFire(int worldX, int worldY, int worldZ);
+    void tickFire();
+
     int seed() const { return m_seed; }
     Dimension dimension() const { return m_dimension; }
     void setDimension(Dimension dim);
@@ -116,6 +122,13 @@ private:
     std::atomic<int> m_pending{0};
 
     FluidSim m_fluid;
+
+    struct FireEntry {
+        glm::ivec3 pos{0};
+        std::uint64_t due = 0;
+    };
+    std::vector<FireEntry> m_fires;
+    std::uint64_t m_fireTick = 0;
 
     const Atlas* m_atlas = nullptr;
     int m_seed = 0;

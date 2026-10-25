@@ -30,6 +30,7 @@
 #include "ui/debug_ui.h"
 #include "world/block.h"
 #include "world/chunk.h"
+#include "world/fire.h"
 #include "world/portal.h"
 #include "world/save.h"
 #include "world/world.h"
@@ -72,12 +73,13 @@ uniform float uAlpha;
 out vec4 FragColor;
 
 void main() {
-    vec3 albedo = texture(uAtlas, vUV).rgb;
+    vec4 texel = texture(uAtlas, vUV);
+    vec3 albedo = texel.rgb;
     vec3 color = albedo * vLight * uLight;
     float dist = distance(vWorld, uCamPos);
     float fog = clamp((dist - uFog.x) / max(uFog.y - uFog.x, 0.001), 0.0, 1.0);
     color = mix(color, uFogColor, fog);
-    FragColor = vec4(color, uAlpha);
+    FragColor = vec4(color, uAlpha * texel.a);
 }
 )GLSL";
 
@@ -802,6 +804,7 @@ int main(int argc, char** argv) {
             int fluidTicks = 0;
             while (fluidAccumulator >= kFluidStep && fluidTicks < 4) {
                 world.tickFluids();
+                world.tickFire();
                 fluidAccumulator -= kFluidStep;
                 ++fluidTicks;
             }
@@ -863,8 +866,11 @@ int main(int argc, char** argv) {
                     if (aimc::lightPortal(world, hit.block + hit.normal)) {
                         audio.play(aimc::Audio::Sound::Ignite, 0.7f);
                         status = "portal lit";
+                    } else if (aimc::placeFire(world, hit.block + hit.normal)) {
+                        audio.play(aimc::Audio::Sound::Ignite, 0.6f);
+                        status = "fire lit";
                     } else {
-                        status = "flint and steel: no obsidian frame";
+                        status = "flint and steel: no obsidian frame or solid ground";
                     }
                 }
             } else if (clickPlace && hit.hit && !held.empty()) {

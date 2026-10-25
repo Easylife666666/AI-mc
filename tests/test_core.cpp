@@ -28,6 +28,7 @@
 #include "world/terrain.h"
 #include "world/save.h"
 #include "world/portal.h"
+#include "world/fire.h"
 #include "world/world.h"
 #include "game/settings.h"
 
@@ -1394,6 +1395,84 @@ TEST(Fluid, LavaNextToExistingWaterTurnsToObsidian) {
 
     EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_WATER);
     EXPECT_EQ(world.getBlock(1, 51, 0), BLOCK_OBSIDIAN);
+}
+
+TEST(Fire, PlacesOnlyOnSolidGround) {
+    Atlas atlas;
+    World world;
+    world.init(41);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 2);
+    EXPECT_TRUE(placeFire(world, glm::ivec3(0, 51, 0)));
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_FIRE);
+    EXPECT_FALSE(placeFire(world, glm::ivec3(0, 52, 0)));  // fire is not a floor
+    EXPECT_FALSE(placeFire(world, glm::ivec3(5, 51, 0)));  // nothing below
+    EXPECT_FALSE(isSolid(BLOCK_FIRE));
+    EXPECT_FALSE(isOpaque(BLOCK_FIRE));
+    EXPECT_EQ(blockDef(BLOCK_FIRE).tileSide, 25);
+}
+
+TEST(Fire, BurnsOutAfterTenSeconds) {
+    Atlas atlas;
+    World world;
+    world.init(42);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 2);
+    ASSERT_TRUE(placeFire(world, glm::ivec3(0, 51, 0)));
+    for (int i = 0; i < 199; ++i) {
+        world.tickFire();
+    }
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_FIRE);
+    world.tickFire();
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_AIR);
+}
+
+TEST(Fire, WaterExtinguishes) {
+    Atlas atlas;
+    World world;
+    world.init(43);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 3);
+    ASSERT_TRUE(placeFire(world, glm::ivec3(0, 51, 0)));
+    ASSERT_TRUE(world.setBlock(1, 51, 0, BLOCK_WATER));
+    world.tickFire();
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_AIR);
+}
+
+TEST(Fire, LosingTheFloorExtinguishes) {
+    Atlas atlas;
+    World world;
+    world.init(44);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 2);
+    ASSERT_TRUE(placeFire(world, glm::ivec3(0, 51, 0)));
+    ASSERT_TRUE(world.setBlock(0, 50, 0, BLOCK_AIR));
+    world.tickFire();
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_AIR);
+}
+
+TEST(Mesh, FireCrossUsesThePortalBuffer) {
+    Atlas atlas;
+    Chunk chunk(glm::ivec2(0, 0));
+    World world;
+    chunk.set(4, 4, 4, static_cast<std::uint8_t>(BLOCK_FIRE));
+
+    ChunkMeshData mesh;
+    buildChunkMesh(chunk, world, atlas, mesh);
+
+    EXPECT_TRUE(mesh.opaque.vertices.empty());
+    EXPECT_TRUE(mesh.water.vertices.empty());
+    EXPECT_TRUE(mesh.lava.vertices.empty());
+    EXPECT_EQ(mesh.portal.vertices.size(), 8u);  // two crossed quads
+    EXPECT_EQ(mesh.portal.indices.size(), 12u);
 }
 
 }  // namespace

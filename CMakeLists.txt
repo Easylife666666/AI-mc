@@ -57,6 +57,7 @@ add_library(aimc_core STATIC
   src/world/chunk.cpp
   src/world/dimension.cpp
   src/world/fluid.cpp
+  src/world/fire.cpp
   src/world/save.cpp
   src/world/portal.cpp
   src/world/terrain.cpp

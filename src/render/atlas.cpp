@@ -231,6 +231,17 @@ glm::vec3 tileColor(int tile, int x, int y) {
         }
         return c;
     }
+    case 25: {  // fire
+        const float n = valueNoise(u * 6.0f, v * 7.0f, 271);
+        const float flicker = 0.5f + 0.5f * std::sin(static_cast<float>(y) * 1.7f +
+                                                     static_cast<float>(x) * 0.6f);
+        glm::vec3 c = mixv({0.70f, 0.10f, 0.02f}, {1.0f, 0.72f, 0.08f},
+                           0.30f + 0.70f * n * flicker);
+        if (y > 9 && n > 0.30f) {
+            c = mixv(c, {1.0f, 0.96f, 0.55f}, 0.55f);
+        }
+        return c;
+    }
     case 24: {  // nether bricks
         const int row = y / 4;
         const int shift = (row % 2) * 4;
@@ -256,6 +267,13 @@ glm::vec3 tileColor(int tile, int x, int y) {
 }
 
 float tileAlpha(int tile, int x, int y) {
+    if (tile == 25) {  // fire: a noisy teardrop with a few transparent gaps
+        const float ny = static_cast<float>(y) / 15.0f;
+        const float width = 5.5f * (1.0f - ny * 0.85f) + 1.4f * (hash01(x, y, 272) - 0.5f);
+        const bool inside = y >= 1 && y <= 14 &&
+                            std::abs(static_cast<float>(x) - 7.5f) <= width;
+        return (inside && hash01(x, y, 273) > 0.05f) ? 1.0f : 0.0f;
+    }
     if (tile != 16) {
         return 1.0f;
     }

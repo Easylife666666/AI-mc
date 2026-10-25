@@ -530,10 +530,52 @@ bool World::setBlock(int worldX, int worldY, int worldZ, BlockId id) {
         markDirtyAt(cx, cz + 1);
     }
     m_fluid.scheduleAround(*this, worldX, worldY, worldZ);
+    if (id == BLOCK_FIRE) {
+        scheduleFire(worldX, worldY, worldZ);
+    }
     return true;
 }
 
 void World::tickFluids() { m_fluid.tick(*this); }
+
+void World::scheduleFire(int worldX, int worldY, int worldZ) {
+    constexpr std::uint64_t kBurnTicks = 200;  // 10 seconds at 20 Hz
+    const glm::ivec3 pos{worldX, worldY, worldZ};
+    for (FireEntry& entry : m_fires) {
+        if (entry.pos == pos) {
+            entry.due = m_fireTick + kBurnTicks;
+            return;
+        }
+    }
+    m_fires.push_back(FireEntry{pos, m_fireTick + kBurnTicks});
+}
+
+void World::tickFire() {
+    ++m_fireTick;
+    static const glm::ivec3 kNeighbours[6] = {{1, 0, 0},  {-1, 0, 0}, {0, 1, 0},
+                                              {0, -1, 0}, {0, 0, 1},  {0, 0, -1}};
+    for (auto it = m_fires.begin(); it != m_fires.end();) {
+        const glm::ivec3 pos = it->pos;
+        if (getBlock(pos.x, pos.y, pos.z) != BLOCK_FIRE) {
+            it = m_fires.erase(it);
+            continue;
+        }
+        const bool supported = isSolid(getBlock(pos.x, pos.y - 1, pos.z));
+        bool wet = false;
+        for (const glm::ivec3& dir : kNeighbours) {
+            if (isWater(getBlock(pos.x + dir.x, pos.y + dir.y, pos.z + dir.z))) {
+                wet = true;
+                break;
+            }
+        }
+        if (!supported || wet || m_fireTick >= it->due) {
+            (void)setBlock(pos.x, pos.y, pos.z, BLOCK_AIR);
+            it = m_fires.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
 
 int World::surfaceY(int worldX, int worldZ) const {
     for (int y = Chunk::SY - 1; y >= 0; --y) {
@@ -620,6 +662,7 @@ void World::clearChunks() {
     m_group.wait();
     m_pending.store(0);
     m_fluid.clear();
+    m_fires.clear();
 
     MeshResult discarded;
     while (m_meshQueue.try_pop(discarded)) {
