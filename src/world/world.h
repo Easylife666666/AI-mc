@@ -16,6 +16,7 @@
 #include "world/block.h"
 #include "world/dimension.h"
 #include "world/chunk.h"
+#include "world/fluid.h"
 
 namespace aimc {
 
@@ -57,6 +58,9 @@ public:
     BlockId getBlock(int worldX, int worldY, int worldZ) const;
     bool setBlock(int worldX, int worldY, int worldZ, BlockId id);
     int surfaceY(int worldX, int worldZ) const;
+
+    // Runs one 20 Hz fluid simulation step (main thread).
+    void tickFluids();
 
     int seed() const { return m_seed; }
     Dimension dimension() const { return m_dimension; }
@@ -110,6 +114,8 @@ private:
     tbb::task_group m_group;
     tbb::concurrent_queue<MeshResult> m_meshQueue;
     std::atomic<int> m_pending{0};
+
+    FluidSim m_fluid;
 
     const Atlas* m_atlas = nullptr;
     int m_seed = 0;

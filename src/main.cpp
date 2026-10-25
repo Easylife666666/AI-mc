@@ -466,6 +466,7 @@ int main(int argc, char** argv) {
     double benchElapsed = 0.0;
     int benchFrames = 0;
     double physicsAccumulator = 0.0;
+    double fluidAccumulator = 0.0;
     float smoothedMs = 16.7f;
     float adaptTimer = 0.0f;
     auto last = std::chrono::steady_clock::now();
@@ -794,6 +795,20 @@ int main(int argc, char** argv) {
             physicsAccumulator = 0.0;
         }
 
+        // Fluids run on a fixed 20 Hz clock, independent of the render rate.
+        constexpr double kFluidStep = 1.0 / 20.0;
+        if (interactive) {
+            fluidAccumulator += static_cast<double>(dt);
+            int fluidTicks = 0;
+            while (fluidAccumulator >= kFluidStep && fluidTicks < 4) {
+                world.tickFluids();
+                fluidAccumulator -= kFluidStep;
+                ++fluidTicks;
+            }
+        } else {
+            fluidAccumulator = 0.0;
+        }
+
         const float targetFov = settings.fov + (sprintActive ? 7.0f : 0.0f);
         smoothedFov += (targetFov - smoothedFov) * std::min(1.0f, 12.0f * dt);
         camera.fovDeg = smoothedFov;
@@ -826,8 +841,9 @@ int main(int argc, char** argv) {
 
         const auto blockGetter = [&world](int x, int y, int z) -> aimc::BlockId {
             const aimc::BlockId block = world.getBlock(x, y, z);
-            const bool passThrough = block == aimc::BLOCK_WATER ||
-                                     block == aimc::BLOCK_LAVA ||
+            // Flowing fluid is see-through for targeting; sources stay
+            // clickable so the player can remove them.
+            const bool passThrough = aimc::isFluidFlow(block) ||
                                      block == aimc::BLOCK_PORTAL_X ||
                                      block == aimc::BLOCK_PORTAL_Z;
             return passThrough ? aimc::BLOCK_AIR : block;
@@ -854,8 +870,7 @@ int main(int argc, char** argv) {
             } else if (clickPlace && hit.hit && !held.empty()) {
                 const glm::ivec3 target = hit.block + hit.normal;
                 const aimc::BlockId existing = world.getBlock(target.x, target.y, target.z);
-                if (existing == aimc::BLOCK_AIR || existing == aimc::BLOCK_WATER ||
-                    existing == aimc::BLOCK_LAVA) {
+                if (existing == aimc::BLOCK_AIR || aimc::isLiquid(existing)) {
                     const glm::vec3 pmin = player.position() - glm::vec3(0.3f, 0.0f, 0.3f);
                     const glm::vec3 pmax = player.position() + glm::vec3(0.3f, 1.8f, 0.3f);
                     const bool overlaps =
@@ -914,11 +929,11 @@ int main(int argc, char** argv) {
             world.getBlock(static_cast<int>(std::floor(camera.pos.x)),
                            static_cast<int>(std::floor(camera.pos.y)),
                            static_cast<int>(std::floor(camera.pos.z)));
-        if (interactive && eyeBlock == aimc::BLOCK_WATER) {
+        if (interactive && aimc::isWater(eyeBlock)) {
             fogRange = glm::vec2(0.5f, 18.0f);
             fogColor = glm::vec3(0.06f, 0.22f, 0.34f) * (0.4f + 0.6f * skyState.dayFactor);
             lightScale *= 0.75f;
-        } else if (interactive && eyeBlock == aimc::BLOCK_LAVA) {
+        } else if (interactive && aimc::isLava(eyeBlock)) {
             fogRange = glm::vec2(0.2f, 6.0f);
             fogColor = glm::vec3(1.0f, 0.42f, 0.06f);
             lightScale = 1.0f;

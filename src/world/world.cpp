@@ -242,6 +242,10 @@ void World::drainUploads(int budget) {
         uploadMesh(result.chunk->lavaMesh, result.mesh.lava);
         uploadMesh(result.chunk->portalMesh, result.mesh.portal);
         result.chunk->state.store(ChunkState::Ready, std::memory_order_release);
+        if (!result.chunk->fluidWoken) {
+            result.chunk->fluidWoken = true;
+            m_fluid.wakeChunk(*this, *result.chunk);
+        }
     }
 }
 
@@ -522,8 +526,11 @@ bool World::setBlock(int worldX, int worldY, int worldZ, BlockId id) {
     if (lz == Chunk::SZ - 1) {
         markDirtyAt(cx, cz + 1);
     }
+    m_fluid.scheduleAround(*this, worldX, worldY, worldZ);
     return true;
 }
+
+void World::tickFluids() { m_fluid.tick(*this); }
 
 int World::surfaceY(int worldX, int worldZ) const {
     for (int y = Chunk::SY - 1; y >= 0; --y) {
@@ -609,6 +616,7 @@ void World::setDimensionEdits(
 void World::clearChunks() {
     m_group.wait();
     m_pending.store(0);
+    m_fluid.clear();
 
     MeshResult discarded;
     while (m_meshQueue.try_pop(discarded)) {

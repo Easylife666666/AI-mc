@@ -191,15 +191,17 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
                                    atlas.tileUV(def.tileSide));
                     continue;
                 }
-                const bool water = block == BLOCK_WATER;
-                const bool lava = block == BLOCK_LAVA;
+                const bool water = isWater(block);
+                const bool lava = isLava(block);
 
                 for (const FaceDef& face : kFaces) {
                     const BlockId neighbour =
                         blockAt(chunk, world, x + face.normal.x, y + face.normal.y,
                                 z + face.normal.z);
 
-                    if (neighbour == block || isOpaque(neighbour)) {
+                    const bool sameFluid = (water && isWater(neighbour)) ||
+                                           (lava && isLava(neighbour));
+                    if (neighbour == block || isOpaque(neighbour) || sameFluid) {
                         continue;
                     }
 

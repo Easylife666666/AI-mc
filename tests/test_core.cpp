@@ -262,6 +262,8 @@ TEST(Save, RoundtripPreservesData) {
     overworld.pitch = -12.0f;
     overworld.edits[0x0000000100000002ull][123] =
         static_cast<std::uint8_t>(BLOCK_STONE);
+    overworld.edits[0x0000000100000002ull][124] =
+        static_cast<std::uint8_t>(BLOCK_WATER_FLOW_3);
 
     DimensionSave& nether = data.dimensions[1];
     nether.playerPos = glm::vec3(-8.0f, 40.0f, 8.0f);
@@ -294,9 +296,11 @@ TEST(Save, RoundtripPreservesData) {
     EXPECT_FLOAT_EQ(loaded.dimensions[1].pitch, -5.0f);
 
     ASSERT_EQ(loaded.dimensions[0].edits.size(), 1u);
-    ASSERT_EQ(loaded.dimensions[0].edits.begin()->second.size(), 1u);
+    ASSERT_EQ(loaded.dimensions[0].edits.begin()->second.size(), 2u);
     EXPECT_EQ(loaded.dimensions[0].edits.begin()->second.at(123),
               static_cast<std::uint8_t>(BLOCK_STONE));
+    EXPECT_EQ(loaded.dimensions[0].edits.begin()->second.at(124),
+              static_cast<std::uint8_t>(BLOCK_WATER_FLOW_3));
     ASSERT_EQ(loaded.dimensions[1].edits.size(), 1u);
     ASSERT_EQ(loaded.dimensions[1].edits.begin()->second.size(), 1u);
     EXPECT_EQ(loaded.dimensions[1].edits.begin()->second.at(7),
@@ -1112,6 +1116,183 @@ TEST(Save, LoadsVersion3WithItems) {
     EXPECT_EQ(loaded.hotbar[1], ItemRef::ofBlock(BLOCK_STONE));
     EXPECT_EQ(loaded.hotbar[8], ItemRef::ofBlock(BLOCK_WATER));
     EXPECT_TRUE(loaded.dimensions[0].edits.empty());
+}
+
+namespace {
+
+bool waitForGeneratedWorld(World& world) {
+    world.update(glm::vec3(0.5f, 64.0f, 0.5f), 2, false);
+    for (int i = 0; i < 500; ++i) {
+        if (world.getBlock(0, 0, 0) != BLOCK_AIR) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return world.getBlock(0, 0, 0) != BLOCK_AIR;
+}
+
+bool waitForNether(World& world) {
+    world.update(glm::vec3(0.5f, 40.0f, 0.5f), 2, false);
+    for (int i = 0; i < 500; ++i) {
+        if (world.getBlock(0, 0, 0) == BLOCK_BEDROCK) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return world.getBlock(0, 0, 0) == BLOCK_BEDROCK;
+}
+
+void buildPlatform(World& world, int y, int radius) {
+    for (int x = -radius; x <= radius; ++x) {
+        for (int z = -radius; z <= radius; ++z) {
+            (void)world.setBlock(x, y, z, BLOCK_STONE);
+        }
+    }
+}
+
+void runFluidTicks(World& world, int count) {
+    for (int i = 0; i < count; ++i) {
+        world.tickFluids();
+    }
+}
+
+}  // namespace
+
+TEST(Fluid, LevelsMapToBlockIds) {
+    EXPECT_EQ(fluidLevel(BLOCK_WATER), 0);
+    EXPECT_EQ(fluidLevel(BLOCK_WATER_FLOW_1), 1);
+    EXPECT_EQ(fluidLevel(BLOCK_WATER_FLOW_7), 7);
+    EXPECT_EQ(fluidLevel(BLOCK_WATER_FALLING), 8);
+    EXPECT_EQ(fluidLevel(BLOCK_LAVA_FLOW_4), 4);
+    EXPECT_EQ(fluidLevel(BLOCK_LAVA_FALLING), 8);
+    EXPECT_EQ(fluidLevel(BLOCK_STONE), -1);
+
+    EXPECT_EQ(fluidBlock(FluidKind::Water, 0), BLOCK_WATER);
+    EXPECT_EQ(fluidBlock(FluidKind::Water, 3), BLOCK_WATER_FLOW_3);
+    EXPECT_EQ(fluidBlock(FluidKind::Water, 8), BLOCK_WATER_FALLING);
+    EXPECT_EQ(fluidBlock(FluidKind::Lava, 7), BLOCK_LAVA_FLOW_7);
+    EXPECT_EQ(fluidBlock(FluidKind::Lava, 8), BLOCK_LAVA_FALLING);
+
+    EXPECT_TRUE(isWater(BLOCK_WATER_FLOW_4));
+    EXPECT_TRUE(isLava(BLOCK_LAVA_FALLING));
+    EXPECT_TRUE(isLiquid(BLOCK_WATER_FALLING));
+    EXPECT_FALSE(isLiquid(BLOCK_STONE));
+    EXPECT_TRUE(isFluidFlow(BLOCK_LAVA_FLOW_2));
+    EXPECT_FALSE(isFluidFlow(BLOCK_LAVA));
+    EXPECT_EQ(fluidKind(BLOCK_WATER), FluidKind::Water);
+    EXPECT_EQ(fluidKind(BLOCK_LAVA), FluidKind::Lava);
+    EXPECT_EQ(fluidKind(BLOCK_AIR), FluidKind::None);
+}
+
+TEST(Fluid, SpreadsSevenBlocksThenDries) {
+    Atlas atlas;
+    World world;
+    world.init(21);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 9);
+    ASSERT_TRUE(world.setBlock(0, 51, 0, BLOCK_WATER));
+    runFluidTicks(world, 80);
+
+    EXPECT_EQ(fluidLevel(world.getBlock(0, 51, 0)), 0);
+    EXPECT_EQ(fluidLevel(world.getBlock(1, 51, 0)), 1);
+    EXPECT_EQ(fluidLevel(world.getBlock(7, 51, 0)), 7);
+    EXPECT_EQ(fluidLevel(world.getBlock(8, 51, 0)), -1);
+    EXPECT_EQ(fluidLevel(world.getBlock(3, 51, 4)), 7);
+    EXPECT_EQ(fluidLevel(world.getBlock(4, 51, 4)), -1);
+
+    ASSERT_TRUE(world.setBlock(0, 51, 0, BLOCK_AIR));
+    runFluidTicks(world, 140);
+    for (int x = -9; x <= 9; ++x) {
+        for (int z = -9; z <= 9; ++z) {
+            EXPECT_FALSE(isWater(world.getBlock(x, 51, z))) << x << "," << z;
+        }
+    }
+}
+
+TEST(Fluid, FallsThenSpreadsOnTheFloor) {
+    Atlas atlas;
+    World world;
+    world.init(22);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 9);
+    ASSERT_TRUE(world.setBlock(0, 54, 0, BLOCK_WATER));
+    runFluidTicks(world, 120);
+
+    EXPECT_EQ(fluidLevel(world.getBlock(0, 54, 0)), 0);
+    EXPECT_EQ(fluidLevel(world.getBlock(0, 53, 0)), 8);
+    EXPECT_EQ(fluidLevel(world.getBlock(0, 51, 0)), 1);
+    EXPECT_EQ(fluidLevel(world.getBlock(1, 51, 0)), 2);
+    EXPECT_EQ(fluidLevel(world.getBlock(2, 51, 0)), 3);
+
+    ASSERT_TRUE(world.setBlock(0, 54, 0, BLOCK_AIR));
+    runFluidTicks(world, 160);
+    for (int y = 51; y <= 54; ++y) {
+        EXPECT_FALSE(isWater(world.getBlock(0, y, 0))) << y;
+    }
+}
+
+TEST(Fluid, LavaSpreadsThreeInOverworld) {
+    Atlas atlas;
+    World world;
+    world.init(23);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 8);
+    ASSERT_TRUE(world.setBlock(0, 51, 0, BLOCK_LAVA));
+    runFluidTicks(world, 200);
+
+    EXPECT_EQ(fluidLevel(world.getBlock(0, 51, 0)), 0);
+    EXPECT_EQ(fluidLevel(world.getBlock(1, 51, 0)), 1);
+    EXPECT_EQ(fluidLevel(world.getBlock(3, 51, 0)), 3);
+    EXPECT_EQ(fluidLevel(world.getBlock(4, 51, 0)), -1);
+
+    ASSERT_TRUE(world.setBlock(0, 51, 0, BLOCK_AIR));
+    runFluidTicks(world, 260);
+    for (int x = -8; x <= 8; ++x) {
+        for (int z = -8; z <= 8; ++z) {
+            EXPECT_FALSE(isLava(world.getBlock(x, 51, z))) << x << "," << z;
+        }
+    }
+}
+
+TEST(Fluid, LavaSpreadsSevenInNether) {
+    Atlas atlas;
+    World world;
+    world.init(24);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    world.setDimension(Dimension::Nether);
+    world.update(glm::vec3(0.5f, 40.0f, 0.5f), 2, false);
+    ASSERT_TRUE(waitForNether(world));
+
+    buildPlatform(world, 55, 9);
+    ASSERT_TRUE(world.setBlock(0, 56, 0, BLOCK_LAVA));
+    runFluidTicks(world, 240);
+
+    EXPECT_EQ(fluidLevel(world.getBlock(0, 56, 0)), 0);
+    EXPECT_EQ(fluidLevel(world.getBlock(7, 56, 0)), 7);
+    EXPECT_EQ(fluidLevel(world.getBlock(8, 56, 0)), -1);
+}
+
+TEST(Mesh, FlowingWaterUsesTheWaterBuffer) {
+    Atlas atlas;
+    Chunk chunk(glm::ivec2(0, 0));
+    World world;
+    chunk.set(4, 4, 4, static_cast<std::uint8_t>(BLOCK_WATER_FLOW_1));
+    chunk.set(5, 4, 4, static_cast<std::uint8_t>(BLOCK_WATER_FLOW_2));
+
+    ChunkMeshData mesh;
+    buildChunkMesh(chunk, world, atlas, mesh);
+
+    EXPECT_TRUE(mesh.opaque.vertices.empty());
+    EXPECT_EQ(mesh.water.vertices.size(), 40u);  // shared face culled
+    EXPECT_EQ(mesh.water.indices.size(), 60u);
 }
 
 }  // namespace

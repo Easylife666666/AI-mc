@@ -13,9 +13,10 @@ constexpr float kGravity = 26.0f;
 constexpr float kJumpSpeed = 8.4f;
 constexpr float kTerminalVelocity = 55.0f;
 
-bool isWaterBlock(const World& world, float x, float y, float z) {
-    return world.getBlock(static_cast<int>(std::floor(x)), static_cast<int>(std::floor(y)),
-                          static_cast<int>(std::floor(z))) == BLOCK_WATER;
+bool isLiquidBlock(const World& world, float x, float y, float z) {
+    return isLiquid(world.getBlock(static_cast<int>(std::floor(x)),
+                                   static_cast<int>(std::floor(y)),
+                                   static_cast<int>(std::floor(z))));
 }
 
 }  // namespace
@@ -108,7 +109,7 @@ void Player::update(const World& world, float yawDeg, const PlayerInput& input, 
     // Sample the block at the feet: chest-height sampling stops the buoyancy
     // forces as soon as the chest breaks the surface, leaving the player stuck
     // one block below the shore.
-    m_inWater = isWaterBlock(world, m_pos.x, m_pos.y + 0.1f, m_pos.z);
+    m_inWater = isLiquidBlock(world, m_pos.x, m_pos.y + 0.1f, m_pos.z);
 
     if (m_flying) {
         const float speed = input.boost ? 24.0f : 12.0f;
@@ -133,7 +134,7 @@ void Player::update(const World& world, float yawDeg, const PlayerInput& input, 
                 // keeps you bobbing at the surface instead of leaping out.
                 float up = 3.4f;
                 const bool topLayer =
-                    !isWaterBlock(world, m_pos.x, m_pos.y + 1.0f, m_pos.z);
+                    !isLiquidBlock(world, m_pos.x, m_pos.y + 1.0f, m_pos.z);
                 if (topLayer && glm::length(glm::vec2(wish.x, wish.z)) > 1.0e-4f) {
                     const float ahead = Width * 0.5f + 0.25f;
                     const int px = static_cast<int>(std::floor(m_pos.x + wish.x * ahead));

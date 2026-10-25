@@ -76,6 +76,9 @@ public:
     GpuMesh lavaMesh;
     GpuMesh portalMesh;
 
+    // Main-thread flag: fluids in this chunk have been scanned after load.
+    bool fluidWoken = false;
+
 private:
     glm::ivec2 m_coord;
     std::vector<std::uint8_t> m_blocks;
