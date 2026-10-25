@@ -89,6 +89,7 @@ struct Audio::Impl {
         clips[static_cast<std::size_t>(Sound::Jump)] = makeThump(0.12f, 300.0f, 620.0f, 20.0f, 0.35f);
         clips[static_cast<std::size_t>(Sound::Land)] = makeThump(0.15f, 150.0f, 70.0f, 26.0f, 0.60f);
         clips[static_cast<std::size_t>(Sound::Ignite)] = makeNoise(0.34f, 0.07f, 7.5f, 0.65f);
+        clips[static_cast<std::size_t>(Sound::Evaporate)] = makeNoise(0.30f, 0.45f, 15.0f, 0.35f);
     }
 
     void mix(float* output, ma_uint32 frameCount) {

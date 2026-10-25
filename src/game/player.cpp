@@ -14,9 +14,17 @@ constexpr float kJumpSpeed = 8.4f;
 constexpr float kTerminalVelocity = 55.0f;
 
 bool isLiquidBlock(const World& world, float x, float y, float z) {
-    return isLiquid(world.getBlock(static_cast<int>(std::floor(x)),
-                                   static_cast<int>(std::floor(y)),
-                                   static_cast<int>(std::floor(z))));
+    const int ix = static_cast<int>(std::floor(x));
+    const int iy = static_cast<int>(std::floor(y));
+    const int iz = static_cast<int>(std::floor(z));
+    const BlockId block = world.getBlock(ix, iy, iz);
+    if (!isLiquid(block)) {
+        return false;
+    }
+    // Flowing levels are shallower than a full block, except when another
+    // liquid fills the cell above (submerged flow is visually full).
+    const float top = isLiquid(world.getBlock(ix, iy + 1, iz)) ? 1.0f : fluidHeight(block);
+    return (y - static_cast<float>(iy)) < top;
 }
 
 }  // namespace

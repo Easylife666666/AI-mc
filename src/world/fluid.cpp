@@ -60,6 +60,18 @@ void spread(World& world, const glm::ivec3& pos, FluidKind kind, int level, int 
     }
 }
 
+const glm::ivec3 kNeighbours6[6] = {{1, 0, 0},  {-1, 0, 0}, {0, 1, 0},
+                                     {0, -1, 0}, {0, 0, 1},  {0, 0, -1}};
+
+bool hasNeighbourKind(const World& world, const glm::ivec3& pos, FluidKind kind) {
+    for (const glm::ivec3& dir : kNeighbours6) {
+        if (fluidKind(world.getBlock(pos.x + dir.x, pos.y + dir.y, pos.z + dir.z)) == kind) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 bool FluidSim::EntryGreater::operator()(const Entry& a, const Entry& b) const {
@@ -170,7 +182,29 @@ void FluidSim::process(World& world, const glm::ivec3& pos) {
         return;
     }
 
+    // Water cannot exist in the nether.
+    if (world.dimension() == Dimension::Nether && kind == FluidKind::Water) {
+        world.setBlock(pos.x, pos.y, pos.z, BLOCK_AIR);
+        return;
+    }
+
+    // Lava touching water solidifies; the water is not consumed.
     const int level = fluidLevel(block);
+    if (kind == FluidKind::Lava && hasNeighbourKind(world, pos, FluidKind::Water)) {
+        world.setBlock(pos.x, pos.y, pos.z,
+                       level == 0 ? BLOCK_OBSIDIAN : BLOCK_COBBLE);
+        return;
+    }
+    if (kind == FluidKind::Water) {
+        for (const glm::ivec3& dir : kNeighbours6) {
+            const glm::ivec3 n = pos + dir;
+            const BlockId neighbour = world.getBlock(n.x, n.y, n.z);
+            if (fluidKind(neighbour) == FluidKind::Lava) {
+                world.setBlock(n.x, n.y, n.z,
+                               fluidLevel(neighbour) == 0 ? BLOCK_OBSIDIAN : BLOCK_COBBLE);
+            }
+        }
+    }
     const int limit = maxLevel(world, kind);
     const BlockId below = pos.y > 0 ? world.getBlock(pos.x, pos.y - 1, pos.z) : BLOCK_BEDROCK;
     const bool canFall = pos.y > 0 && isPassable(below);
@@ -234,6 +268,10 @@ void FluidSim::wakeChunk(World& world, const Chunk& chunk) {
             for (int x = 0; x < Chunk::SX; ++x) {
                 const BlockId block = static_cast<BlockId>(chunk.get(x, y, z));
                 if (!isLiquid(block)) {
+                    continue;
+                }
+                if (world.dimension() == Dimension::Nether && isWater(block)) {
+                    (void)world.setBlock(origin.x + x, y, origin.z + z, BLOCK_AIR);
                     continue;
                 }
                 const glm::ivec3 pos(origin.x + x, y, origin.z + z);

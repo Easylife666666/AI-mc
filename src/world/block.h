@@ -79,4 +79,8 @@ bool isFluidFlow(BlockId id);  // flowing/falling, i.e. not a source
 int fluidLevel(BlockId id);    // 0 source, 1..7 flow, 8 falling, -1 not a fluid
 BlockId fluidBlock(FluidKind kind, int level);
 
+// Visible surface height inside the block (1.0 for sources, falling columns and
+// non-fluids; flowing levels step down by 1/8 each).
+float fluidHeight(BlockId id);
+
 }  // namespace aimc

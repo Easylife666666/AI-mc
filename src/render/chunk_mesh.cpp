@@ -163,6 +163,86 @@ void emitFace(const Chunk& chunk, Mesh& mesh, int x, int y, int z, const FaceDef
     }
 }
 
+
+bool sameFluidKind(BlockId a, BlockId b) {
+    const FluidKind kind = fluidKind(a);
+    return kind != FluidKind::None && kind == fluidKind(b);
+}
+
+// A fluid cell is visually full when another fluid sits directly above it.
+float fluidTopAt(const Chunk& chunk, const World& world, int x, int y, int z, BlockId block) {
+    const BlockId above = blockAt(chunk, world, x, y + 1, z);
+    if (sameFluidKind(above, block)) {
+        return 1.0f;
+    }
+    return fluidHeight(block);
+}
+
+void emitFluidFace(const Chunk& chunk, MeshData& mesh, int x, int y, int z, const FaceDef& face,
+                   float y0, float y1, const glm::vec4& uvRect, float light) {
+    const glm::ivec3 origin = chunk.origin();
+    const std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size());
+    for (int c = 0; c < 4; ++c) {
+        Vertex v{};
+        v.pos[0] = static_cast<float>(origin.x + x + face.corner[c].x);
+        v.pos[1] = static_cast<float>(origin.y + y) + (face.corner[c].y == 1 ? y1 : y0);
+        v.pos[2] = static_cast<float>(origin.z + z + face.corner[c].z);
+        v.uv[0] = lerp(uvRect.x, uvRect.z, face.uv[c].x);
+        v.uv[1] = lerp(uvRect.y, uvRect.w, face.uv[c].y);
+        v.light = light;
+        mesh.vertices.push_back(v);
+    }
+    mesh.indices.push_back(base + 0);
+    mesh.indices.push_back(base + 1);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 0);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 3);
+}
+
+// Fluids are a box up to their surface height instead of a full cube. Sides
+// between two levels are clipped to the exposed slice, which makes a flowing
+// sheet step down by 1/8 of a block per level.
+void emitFluidBlock(const Chunk& chunk, const World& world, MeshData& mesh, int x, int y, int z,
+                    BlockId block, const BlockDef& def, const Atlas& atlas) {
+    const float top = fluidTopAt(chunk, world, x, y, z, block);
+    const float lightFactor = isLava(block) ? 1.0f : 0.9f;
+    const glm::vec4 uvRect = atlas.tileUV(def.tileSide);
+
+    const BlockId above = blockAt(chunk, world, x, y + 1, z);
+    if (!isOpaque(above) && !sameFluidKind(above, block)) {
+        emitFluidFace(chunk, mesh, x, y, z, kFaces[2], top, top, uvRect,
+                      kFaces[2].light * lightFactor);
+    }
+
+    const BlockId below = blockAt(chunk, world, x, y - 1, z);
+    if (!isOpaque(below) && !sameFluidKind(below, block)) {
+        emitFluidFace(chunk, mesh, x, y, z, kFaces[3], 0.0f, 0.0f, uvRect,
+                      kFaces[3].light * lightFactor);
+    }
+
+    static constexpr int kSideFaces[4] = {0, 1, 4, 5};
+    for (const int index : kSideFaces) {
+        const FaceDef& face = kFaces[index];
+        const int nx = x + face.normal.x;
+        const int nz = z + face.normal.z;
+        const BlockId neighbour = blockAt(chunk, world, nx, y, nz);
+        if (isOpaque(neighbour)) {
+            continue;
+        }
+        float y0 = 0.0f;
+        if (sameFluidKind(neighbour, block)) {
+            const float neighbourTop = fluidTopAt(chunk, world, nx, y, nz, neighbour);
+            if (neighbourTop >= top - 1.0e-4f) {
+                continue;
+            }
+            y0 = neighbourTop;
+        }
+        emitFluidFace(chunk, mesh, x, y, z, face, y0, top, uvRect,
+                      face.light * lightFactor);
+    }
+}
+
 }  // namespace
 
 void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
@@ -191,17 +271,18 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
                                    atlas.tileUV(def.tileSide));
                     continue;
                 }
-                const bool water = isWater(block);
-                const bool lava = isLava(block);
+                if (isWater(block) || isLava(block)) {
+                    MeshData& target = isLava(block) ? out.lava : out.water;
+                    emitFluidBlock(chunk, world, target, x, y, z, block, def, atlas);
+                    continue;
+                }
 
                 for (const FaceDef& face : kFaces) {
                     const BlockId neighbour =
                         blockAt(chunk, world, x + face.normal.x, y + face.normal.y,
                                 z + face.normal.z);
 
-                    const bool sameFluid = (water && isWater(neighbour)) ||
-                                           (lava && isLava(neighbour));
-                    if (neighbour == block || isOpaque(neighbour) || sameFluid) {
+                    if (neighbour == block || isOpaque(neighbour)) {
                         continue;
                     }
 
@@ -210,18 +291,11 @@ void buildChunkMesh(const Chunk& chunk, const World& world, const Atlas& atlas,
                                                         : def.tileSide;
                     const glm::vec4 uvRect = atlas.tileUV(tile);
 
-                    if (water || lava) {
-                        const float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-                        MeshData& target = lava ? out.lava : out.water;
-                        const float light = lava ? 1.0f : face.light * 0.9f;
-                        emitFace(chunk, target, x, y, z, face, uvRect, light, ao);
-                    } else {
-                        float ao[4];
-                        for (int c = 0; c < 4; ++c) {
-                            ao[c] = vertexAo(chunk, world, x, y, z, face, c);
-                        }
-                        emitFace(chunk, out.opaque, x, y, z, face, uvRect, face.light, ao);
+                    float ao[4];
+                    for (int c = 0; c < 4; ++c) {
+                        ao[c] = vertexAo(chunk, world, x, y, z, face, c);
                     }
+                    emitFace(chunk, out.opaque, x, y, z, face, uvRect, face.light, ao);
                 }
             }
         }

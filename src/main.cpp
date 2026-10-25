@@ -881,7 +881,11 @@ int main(int argc, char** argv) {
                         static_cast<float>(target.z) < pmax.z &&
                         static_cast<float>(target.z + 1) > pmin.z;
                     if (!overlaps) {
-                        if (world.setBlock(target.x, target.y, target.z, held.block)) {
+                        if (dimension == aimc::Dimension::Nether &&
+                            aimc::isWater(held.block)) {
+                            audio.play(aimc::Audio::Sound::Evaporate, 0.6f);
+                            status = "water evaporates in the nether";
+                        } else if (world.setBlock(target.x, target.y, target.z, held.block)) {
                             audio.play(aimc::Audio::Sound::Place, 0.7f);
                         }
                     }
@@ -925,15 +929,22 @@ int main(int argc, char** argv) {
         }
         float lightScale = skyState.light;
 
-        const aimc::BlockId eyeBlock =
-            world.getBlock(static_cast<int>(std::floor(camera.pos.x)),
-                           static_cast<int>(std::floor(camera.pos.y)),
-                           static_cast<int>(std::floor(camera.pos.z)));
-        if (interactive && aimc::isWater(eyeBlock)) {
+        const int eyeX = static_cast<int>(std::floor(camera.pos.x));
+        const int eyeY = static_cast<int>(std::floor(camera.pos.y));
+        const int eyeZ = static_cast<int>(std::floor(camera.pos.z));
+        const aimc::BlockId eyeBlock = world.getBlock(eyeX, eyeY, eyeZ);
+        const float eyeFraction = camera.pos.y - static_cast<float>(eyeY);
+        const float eyeFluidTop =
+            aimc::isLiquid(world.getBlock(eyeX, eyeY + 1, eyeZ))
+                ? 1.0f
+                : aimc::fluidHeight(eyeBlock);
+        const bool eyeInWater = aimc::isWater(eyeBlock) && eyeFraction < eyeFluidTop;
+        const bool eyeInLava = aimc::isLava(eyeBlock) && eyeFraction < eyeFluidTop;
+        if (interactive && eyeInWater) {
             fogRange = glm::vec2(0.5f, 18.0f);
             fogColor = glm::vec3(0.06f, 0.22f, 0.34f) * (0.4f + 0.6f * skyState.dayFactor);
             lightScale *= 0.75f;
-        } else if (interactive && aimc::isLava(eyeBlock)) {
+        } else if (interactive && eyeInLava) {
             fogRange = glm::vec2(0.2f, 6.0f);
             fogColor = glm::vec3(1.0f, 0.42f, 0.06f);
             lightScale = 1.0f;

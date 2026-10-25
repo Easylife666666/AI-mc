@@ -125,4 +125,12 @@ BlockId fluidBlock(FluidKind kind, int level) {
     return BLOCK_AIR;
 }
 
+float fluidHeight(BlockId id) {
+    const int level = fluidLevel(id);
+    if (level <= 0 || level >= 8) {
+        return 1.0f;
+    }
+    return 1.0f - static_cast<float>(level) * 0.125f;
+}
+
 }  // namespace aimc

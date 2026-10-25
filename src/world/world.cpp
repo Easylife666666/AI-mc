@@ -481,6 +481,9 @@ bool World::setBlock(int worldX, int worldY, int worldZ, BlockId id) {
     if (worldY < 0 || worldY >= Chunk::SY) {
         return false;
     }
+    if (m_dimension == Dimension::Nether && isWater(id)) {
+        return false;  // water evaporates in the nether
+    }
     const int cx = floorDiv(worldX, Chunk::SX);
     const int cz = floorDiv(worldZ, Chunk::SZ);
     const int lx = floorMod(worldX, Chunk::SX);

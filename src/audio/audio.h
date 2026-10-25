@@ -15,6 +15,7 @@ public:
         Jump,
         Land,
         Ignite,
+        Evaporate,
         Count,
     };
 

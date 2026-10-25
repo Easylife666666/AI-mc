@@ -1291,8 +1291,109 @@ TEST(Mesh, FlowingWaterUsesTheWaterBuffer) {
     buildChunkMesh(chunk, world, atlas, mesh);
 
     EXPECT_TRUE(mesh.opaque.vertices.empty());
-    EXPECT_EQ(mesh.water.vertices.size(), 40u);  // shared face culled
-    EXPECT_EQ(mesh.water.indices.size(), 60u);
+    // The shared face is culled, but the lower level still exposes a partial
+    // side face under the higher one: 11 faces.
+    EXPECT_EQ(mesh.water.vertices.size(), 44u);
+    EXPECT_EQ(mesh.water.indices.size(), 66u);
+}
+
+TEST(Mesh, FlowingFluidSurfaceStepsDown) {
+    Atlas atlas;
+    Chunk chunk(glm::ivec2(0, 0));
+    World world;
+    chunk.set(4, 4, 4, static_cast<std::uint8_t>(BLOCK_WATER));        // source
+    chunk.set(5, 4, 4, static_cast<std::uint8_t>(BLOCK_WATER_FLOW_1));  // level 1
+
+    ChunkMeshData mesh;
+    buildChunkMesh(chunk, world, atlas, mesh);
+
+    bool sourceTop = false;
+    bool flowTop = false;
+    for (const Vertex& v : mesh.water.vertices) {
+        if (v.pos[1] == 5.0f) {
+            sourceTop = true;
+        }
+        if (v.pos[1] == 4.875f) {
+            flowTop = true;
+        }
+    }
+    EXPECT_TRUE(sourceTop);
+    EXPECT_TRUE(flowTop);
+}
+
+TEST(Fluid, HeightsFollowLevels) {
+    EXPECT_FLOAT_EQ(fluidHeight(BLOCK_WATER), 1.0f);
+    EXPECT_FLOAT_EQ(fluidHeight(BLOCK_WATER_FLOW_1), 0.875f);
+    EXPECT_FLOAT_EQ(fluidHeight(BLOCK_WATER_FLOW_7), 0.125f);
+    EXPECT_FLOAT_EQ(fluidHeight(BLOCK_WATER_FALLING), 1.0f);
+    EXPECT_FLOAT_EQ(fluidHeight(BLOCK_LAVA_FLOW_4), 0.5f);
+    EXPECT_FLOAT_EQ(fluidHeight(BLOCK_LAVA), 1.0f);
+    EXPECT_FLOAT_EQ(fluidHeight(BLOCK_STONE), 1.0f);
+}
+
+TEST(Fluid, WaterCannotBePlacedInNether) {
+    Atlas atlas;
+    World world;
+    world.init(31);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    world.setDimension(Dimension::Nether);
+    world.update(glm::vec3(0.5f, 40.0f, 0.5f), 2, false);
+    ASSERT_TRUE(waitForNether(world));
+
+    EXPECT_FALSE(world.setBlock(0, 55, 0, BLOCK_WATER));
+    EXPECT_FALSE(world.setBlock(0, 55, 0, BLOCK_WATER_FLOW_3));
+    EXPECT_FALSE(isWater(world.getBlock(0, 55, 0)));
+    EXPECT_TRUE(world.setBlock(0, 55, 0, BLOCK_LAVA));
+}
+
+TEST(Fluid, LavaSourceTouchingWaterTurnsToObsidian) {
+    Atlas atlas;
+    World world;
+    world.init(32);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 8);
+    ASSERT_TRUE(world.setBlock(0, 51, 0, BLOCK_LAVA));
+    ASSERT_TRUE(world.setBlock(1, 51, 0, BLOCK_WATER));
+    runFluidTicks(world, 12);
+
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_OBSIDIAN);
+    EXPECT_EQ(world.getBlock(1, 51, 0), BLOCK_WATER);
+}
+
+TEST(Fluid, FlowingLavaTouchingWaterTurnsToCobblestone) {
+    Atlas atlas;
+    World world;
+    world.init(33);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 8);
+    ASSERT_TRUE(world.setBlock(0, 51, 0, BLOCK_LAVA_FLOW_2));
+    ASSERT_TRUE(world.setBlock(1, 51, 0, BLOCK_WATER));
+    runFluidTicks(world, 12);
+
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_COBBLE);
+    EXPECT_EQ(world.getBlock(1, 51, 0), BLOCK_WATER);
+}
+
+TEST(Fluid, LavaNextToExistingWaterTurnsToObsidian) {
+    Atlas atlas;
+    World world;
+    world.init(34);
+    world.setAtlas(&atlas);
+    ASSERT_TRUE(waitForGeneratedWorld(world));
+
+    buildPlatform(world, 50, 8);
+    ASSERT_TRUE(world.setBlock(0, 51, 0, BLOCK_WATER));
+    ASSERT_TRUE(world.setBlock(1, 51, 0, BLOCK_LAVA));
+    runFluidTicks(world, 12);
+
+    EXPECT_EQ(world.getBlock(0, 51, 0), BLOCK_WATER);
+    EXPECT_EQ(world.getBlock(1, 51, 0), BLOCK_OBSIDIAN);
 }
 
 }  // namespace
